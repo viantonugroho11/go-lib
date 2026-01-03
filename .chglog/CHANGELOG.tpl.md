@@ -8,6 +8,13 @@
 - {{ if .Scope }}**{{ .Scope }}:** {{ end }}{{ .Subject }}
 {{ end }}
 {{ end -}}
+{{- if not .CommitGroups -}}
+### Changes
+
+{{ range .Commits -}}
+- {{ if .Scope }}**{{ .Scope }}:** {{ end }}{{ .Subject }}
+{{ end }}
+{{ end -}}
 {{- if .NoteGroups -}}
 #### Notes
 

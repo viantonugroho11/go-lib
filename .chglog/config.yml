@@ -8,6 +8,7 @@ options:
       exclude:
         - "^test: "
   commit_groups:
+    group_by: "Type"
     title_maps:
       feat: "Features"
       fix: "Bug Fixes"
@@ -19,6 +20,8 @@ options:
       chore: "Chores"
     order: ["feat", "fix", "perf", "refactor", "revert", "docs", "test", "chore"]
   header:
-    pattern: "(.*)"
+    pattern: "^(?P<Type>feat|fix|perf|refactor|revert|docs|test|chore)(?:\\((?P<Scope>[^\\)]+)\\))?!?:\\s(?P<Subject>.*)$|^(?P<Subject>.*)$"
     pattern_maps:
-      - "subject"
+      - "Type"
+      - "Scope"
+      - "Subject"
