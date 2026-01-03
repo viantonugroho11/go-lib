@@ -96,7 +96,7 @@ func (v *ViperLoader) Load(cfg interface{}) (err error) {
 	err = v.loadFromFileAndEnv()
 	if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 		err = fmt.Errorf("%w: no '%s' file found on search paths.", ErrConfigFileNotFound, v.configFileName)
-		return
+		return 
 	}
 	err = v.Unmarshal(cfg, decOption)
 	return

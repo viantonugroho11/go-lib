@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: Module Release
 permissions:
   contents: write
 
@@ -11,49 +11,11 @@ on:
       - main
 
 jobs:
-  setup-and-build:
+  module-release:
     runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: go.mod
-
-    - name: Configure git to use the access token
-      run: |
-        git config --global url."https://${{ secrets.TOKENGITHUB }}@github.com/".insteadOf "https://github.com/"
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-    - name: Debug git configuration
-      run: git config --global --list
-
-    - name: Verify git access
-      run: git ls-remote https://github.com/viantonugroho11/go-config-library.git
-
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
-
-    - name: Install dependencies
-      run: go mod download
-
-    - name: Run tests
-      run: go test ./...
-
-  generate-and-commit-changelog:
-    runs-on: ubuntu-latest
-    needs: setup-and-build
+    strategy:
+      matrix:
+        module: [config, kafka, xlog]
 
     steps:
     - name: Checkout code
@@ -61,10 +23,15 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Set up Go
+    - name: Configure Git
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+    - name: Set up Go (for git-chglog)
       uses: actions/setup-go@v5
       with:
-        go-version-file: go.mod
+        go-version: "1.22.x"
 
     - name: Install git-chglog
       run: |
@@ -72,78 +39,76 @@ jobs:
         echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
     - name: Fetch tags
-      run: git fetch --tags
+      run: git fetch --tags --force
 
-    - name: Generate Changelog
+    - name: Calculate changed files
+      id: diff
       run: |
-        git fetch --tags --force
-        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-        if [ -z "$LAST_TAG" ]; then
-          NEW_TAG="v0.1.0"
-        else
-          VERSION=${LAST_TAG#v}
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-          PATCH=$((PATCH + 1))
-          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+        BEFORE="${{ github.event.before }}"
+        AFTER="${{ github.sha }}"
+        if [ -z "$BEFORE" ]; then
+          # Fallback to initial commit if 'before' is not available (e.g., manual dispatch)
+          BEFORE=$(git rev-list --max-parents=0 HEAD | tail -n1)
         fi
-        echo "NEXT_TAG=$NEW_TAG" >> $GITHUB_ENV
-        git-chglog --next-tag "$NEW_TAG" -o CHANGELOG.md
+        git diff --name-only "$BEFORE" "$AFTER" > /tmp/changed_files.txt
+        echo "Changed files:"
+        cat /tmp/changed_files.txt || true
 
-    - name: Commit Changelog
+    - name: Detect module change
+      id: detect
       run: |
-        git config --global user.name 'github-actions'
-        git config --global user.email 'github-actions@github.com'
-        git add CHANGELOG.md
+        MODULE="${{ matrix.module }}"
+        if grep -E "^${MODULE}/" /tmp/changed_files.txt >/dev/null 2>&1; then
+          echo "changed=true" >> $GITHUB_OUTPUT
+        else
+          echo "changed=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Compute next tag for module
+      id: version
+      if: steps.detect.outputs.changed == 'true' && github.event_name == 'push'
+      run: |
+        MODULE="${{ matrix.module }}"
+        LAST_TAG=$(git tag --list "${MODULE}/v*" | sort -V | tail -n1)
+        if [ -z "$LAST_TAG" ]; then
+          NEW_VERSION="v0.1.0"
+        else
+          # Extract numeric version from the last tag (e.g., kafka/v1.2.3 -> 1.2.4)
+          RAW="${LAST_TAG##*/}"     # v1.2.3
+          NUM="${RAW#v}"            # 1.2.3
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$NUM"
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+        fi
+        NEW_TAG="${MODULE}/${NEW_VERSION}"
+        echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "Computed new tag: $NEW_TAG"
+
+    - name: Generate module changelog
+      if: steps.detect.outputs.changed == 'true' && github.event_name == 'push'
+      run: |
+        MODULE="${{ matrix.module }}"
+        NEW_TAG="${{ steps.version.outputs.new_tag }}"
+        # Generate changelog scoped to the module path
+        git-chglog --config .chglog/config.yml --next-tag "$NEW_TAG" --path "$MODULE" -o "$MODULE/CHANGELOG.md"
+
+    - name: Commit changelog (if changed)
+      if: steps.detect.outputs.changed == 'true' && github.event_name == 'push'
+      run: |
+        MODULE="${{ matrix.module }}"
+        git add "$MODULE/CHANGELOG.md"
         if git diff --cached --quiet; then
-          echo "No changes to commit."
+          echo "No changelog changes to commit for $MODULE"
         else
-          git commit -m "chore(changelog): update for $NEXT_TAG"
+          git commit -m "chore(${MODULE}): update changelog for ${{ steps.version.outputs.new_tag }}"
+          git push
         fi
-      env:
-        GITHUB_TOKEN: ${{ secrets.TOKENGITHUB }}
 
-    - name: Debug Changelog
-      run: cat CHANGELOG.md
-
-    # - name: Commit Changelog
-    #   if: github.event_name == 'push'
-    #   run: |
-    #     git add .
-    #     git commit -m "Update changelog for $(git describe --tags --abbrev=0 2>/dev/null || echo 'Initial commit')"
-    #   env:
-    #     GITHUB_TOKEN: ${{ secrets.TOKENGITHUB }}
-
-    - name: Push Changelog
-      if: github.event_name == 'push'
-      uses: ad-m/github-push-action@master
-      with:
-        github_token: ${{ secrets.TOKENGITHUB }}
-        branch: main
-  tag-and-release:
-    runs-on: ubuntu-latest
-    needs: generate-and-commit-changelog
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Create Build Tag
-      if: github.event_name == 'push'
+    - name: Create and push tag
+      if: steps.detect.outputs.changed == 'true' && github.event_name == 'push'
       run: |
-        git fetch --tags --force
-        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-        if [ -z "$LAST_TAG" ]; then
-          NEW_TAG="v0.1.0"
-        else
-          VERSION=${LAST_TAG#v}
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-          PATCH=$((PATCH + 1))
-          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
-        fi
-        echo "Tagging $NEW_TAG"
-        git tag "$NEW_TAG"
-        git push origin "$NEW_TAG"
-      env:
-        GITHUB_TOKEN: ${{ secrets.TOKENGITHUB }}
+        NEW_TAG="${{ steps.version.outputs.new_tag }}"
+        echo "Tagging ${NEW_TAG}"
+        git tag "${NEW_TAG}"
+        git push origin "${NEW_TAG}"

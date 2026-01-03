@@ -1,7 +1,7 @@
 template: CHANGELOG.tpl.md
 info:
   title: ""
-  repository_url: "https://github.com/viantonugroho11/go-config-library"
+  repository_url: "https://github.com/viantonugroho11/go-lib"
 options:
   commits:
     filters:
