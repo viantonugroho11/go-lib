@@ -91,7 +91,7 @@ jobs:
         MODULE="${{ matrix.module }}"
         NEW_TAG="${{ steps.version.outputs.new_tag }}"
         # Generate changelog scoped to the module path
-        git-chglog --config .chglog/config.yml --next-tag "$NEW_TAG" --path "$MODULE" -o "$MODULE/CHANGELOG.md"
+        git-chglog --config .chglog/config.yml --tag-filter-pattern "^${MODULE}/v" --next-tag "$NEW_TAG" --path "$MODULE" -o "$MODULE/CHANGELOG.md"
 
     - name: Commit changelog (if changed)
       if: steps.detect.outputs.changed == 'true' && github.event_name == 'push'
