@@ -1,0 +1,24 @@
+template: CHANGELOG.tpl.md
+info:
+  title: ""
+  repository_url: "https://github.com/viantonugroho11/go-config-library"
+options:
+  commits:
+    filters:
+      exclude:
+        - "^test: "
+  commit_groups:
+    title_maps:
+      feat: "Features"
+      fix: "Bug Fixes"
+      perf: "Performance"
+      refactor: "Refactoring"
+      revert: "Reverts"
+      docs: "Documentation"
+      test: "Tests"
+      chore: "Chores"
+    order: ["feat", "fix", "perf", "refactor", "revert", "docs", "test", "chore"]
+  header:
+    pattern: "(.*)"
+    pattern_maps:
+      - "subject"
