@@ -1,7 +1,10 @@
 package xlog
 
 import (
+	"context"
 	"time"
+
+	"go.uber.org/zap/zapcore"
 )
 
 // Option adalah fungsi opsional untuk mengubah konfigurasi logger.
@@ -171,4 +174,11 @@ func WithTimeFieldKey(key string) Option {
 	return func(cfg *Config) {
 		cfg.TimeFieldKey = key
 	}
+}
+
+type Field = zapcore.Field
+
+// Error melakukan logging error pada logger global dengan dukungan field dari context.
+func Error(ctx context.Context, message string, fields ...Field) {
+	Logger().With(populateContextFields(ctx)...).Error(message, fields...)
 }

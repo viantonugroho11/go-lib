@@ -76,6 +76,16 @@ func S() *zap.SugaredLogger {
 	return zap.S()
 }
 
+// Logger mengembalikan logger global (nama formal untuk L).
+func Logger() *zap.Logger {
+	return zap.L()
+}
+
+// SugaredLogger mengembalikan sugared logger global (nama formal untuk S).
+func SugaredLogger() *zap.SugaredLogger {
+	return zap.S()
+}
+
 func parseLevel(lvl string) zapcore.Level {
 	switch strings.ToLower(strings.TrimSpace(lvl)) {
 	case "debug":
