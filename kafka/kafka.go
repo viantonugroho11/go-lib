@@ -15,14 +15,14 @@ import (
 	"github.com/IBM/sarama"
 )
 
-// MessageHandler menangani message; return error untuk tidak commit (akan diproses ulang).
+// MessageHandler handles a message; return error to avoid commit (will be retried).
 type MessageHandler func(ctx context.Context, msg *sarama.ConsumerMessage) error
 
-// TypedMessageHandler memproses event bertipe E yang sudah di-unmarshal.
-// msg asli tetap diberikan jika butuh key/headers/metadata lain.
+// TypedMessageHandler processes a typed event E that has been unmarshaled.
+// The original msg is still provided in case key/headers/metadata are needed.
 type TypedMessageHandler[E any] func(ctx context.Context, msg *sarama.ConsumerMessage, evt E) error
 
-// HandlerOption mengonfigurasi cara inisialisasi dan decode event bertipe E.
+// HandlerOption configures how to initialize and decode typed events E.
 type HandlerOption[E any] func(*handlerConfig[E])
 
 type handlerConfig[E any] struct {
@@ -30,28 +30,28 @@ type handlerConfig[E any] struct {
 	decode   func([]byte, *E) error
 }
 
-// WithNewEvent menyediakan konstruktor event bertipe E (untuk default values).
-// Jika tidak diset, default-nya adalah new(E).
+// WithNewEvent provides a constructor for event type E (for default values).
+// If not set, the default is new(E).
 func WithNewEvent[E any](fn func() E) HandlerOption[E] {
 	return func(c *handlerConfig[E]) { c.newEvent = fn }
 }
 
-// WithDecoder menyediakan fungsi decode khusus ke struct E.
-// Contoh: JSON, Protobuf, Avro, dsb.
+// WithDecoder sets a custom decode function into struct E.
+// Examples: JSON, Protobuf, Avro, etc.
 func WithDecoder[E any](fn func([]byte, *E) error) HandlerOption[E] {
 	return func(c *handlerConfig[E]) { c.decode = fn }
 }
 
-// WithJSONDecoder mengatur decoder menjadi JSON (default jika tidak diset).
+// WithJSONDecoder sets the decoder to JSON (default if not set).
 func WithJSONDecoder[E any]() HandlerOption[E] {
 	return func(c *handlerConfig[E]) {
 		c.decode = func(b []byte, dst *E) error { return json.Unmarshal(b, dst) }
 	}
 }
 
-// AdaptTypedHandler membungkus TypedMessageHandler menjadi MessageHandler biasa.
-// - Inisialisasi struct E dilakukan via WithNewEvent (opsional).
-// - Unmarshal dilakukan otomatis via decoder (default JSON jika tidak diset).
+// AdaptTypedHandler wraps a TypedMessageHandler into a plain MessageHandler.
+// - Struct E is initialized via WithNewEvent (optional).
+// - Unmarshal is performed automatically via decoder (default JSON if not set).
 func AdaptTypedHandler[E any](th TypedMessageHandler[E], opts ...HandlerOption[E]) MessageHandler {
 	cfg := &handlerConfig[E]{
 		newEvent: func() E { var zero E; return zero },
@@ -78,13 +78,13 @@ type Consumer struct {
 	wg     sync.WaitGroup
 }
 
-// ConsumerOption untuk mengonfigurasi sarama.Config sebelum membuat consumer group.
+// ConsumerOption customizes sarama.Config before creating the consumer group.
 type ConsumerOption func(cfg *sarama.Config)
 
-// NewConsumer membuat consumer group generik untuk satu atau banyak topik.
+// NewConsumer creates a generic consumer group for one or multiple topics.
 func NewConsumer(brokers []string, groupID string, topics []string, handler MessageHandler, options ...ConsumerOption) (*Consumer, error) {
 	cfg := sarama.NewConfig()
-	// Defaults aman dan umum
+	// Safe and common defaults
 	cfg.ClientID = "go-lib-kafka"
 	cfg.Version = sarama.V2_8_0_0
 	cfg.Consumer.Return.Errors = true
@@ -115,7 +115,7 @@ func (c *Consumer) Start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.wg.Add(1)
-	// Drain error channel agar tidak deadlock
+	// Drain the error channel to avoid deadlocks
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -159,7 +159,7 @@ func (h *cgHandler) Cleanup(_ sarama.ConsumerGroupSession) error { return nil }
 func (h *cgHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	for msg := range claim.Messages() {
 		if err := h.handler(sess.Context(), msg); err == nil {
-			// Commit hanya jika handler sukses
+			// Commit only when the handler succeeds
 			sess.MarkMessage(msg, "")
 		}
 	}
@@ -168,37 +168,37 @@ func (h *cgHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.
 
 // ---------- Opsi umum ----------
 
-// WithConsumerClientID set client id
+// WithConsumerClientID sets the client id.
 func WithConsumerClientID(clientID string) ConsumerOption {
 	return func(cfg *sarama.Config) { cfg.ClientID = clientID }
 }
 
-// WithConsumerVersion set Kafka version
+// WithConsumerVersion sets the Kafka version.
 func WithConsumerVersion(version sarama.KafkaVersion) ConsumerOption {
 	return func(cfg *sarama.Config) { cfg.Version = version }
 }
 
-// WithInitialOffset pilih offset awal (Newest/Oldest)
+// WithInitialOffset chooses the initial offset (Newest/Oldest).
 func WithInitialOffset(offset int64) ConsumerOption {
 	return func(cfg *sarama.Config) { cfg.Consumer.Offsets.Initial = offset }
 }
 
-// WithRebalanceStrategy pilih strategi rebalance
+// WithRebalanceStrategy chooses the rebalance strategy.
 func WithRebalanceStrategy(strategy sarama.BalanceStrategy) ConsumerOption {
 	return func(cfg *sarama.Config) { cfg.Consumer.Group.Rebalance.Strategy = strategy }
 }
 
-// WithGroupSessionTimeout set session timeout
+// WithGroupSessionTimeout sets the session timeout.
 func WithGroupSessionTimeout(d time.Duration) ConsumerOption {
 	return func(cfg *sarama.Config) { cfg.Consumer.Group.Session.Timeout = d }
 }
 
-// WithGroupHeartbeatInterval set heartbeat interval
+// WithGroupHeartbeatInterval sets the heartbeat interval.
 func WithGroupHeartbeatInterval(d time.Duration) ConsumerOption {
 	return func(cfg *sarama.Config) { cfg.Consumer.Group.Heartbeat.Interval = d }
 }
 
-// WithNetTimeouts set dial/read/write timeout
+// WithNetTimeouts sets dial/read/write timeouts.
 func WithNetTimeouts(dial, read, write time.Duration) ConsumerOption {
 	return func(cfg *sarama.Config) {
 		cfg.Net.DialTimeout = dial
@@ -207,7 +207,7 @@ func WithNetTimeouts(dial, read, write time.Duration) ConsumerOption {
 	}
 }
 
-// WithTLSEnable aktifkan TLS; jika insecure true maka skip verifikasi sertifikat
+// WithTLSEnable enables TLS; if insecureSkipVerify is true, certificate verification is skipped.
 func WithTLSEnable(insecureSkipVerify bool) ConsumerOption {
 	return func(cfg *sarama.Config) {
 		cfg.Net.TLS.Enable = true
@@ -215,7 +215,7 @@ func WithTLSEnable(insecureSkipVerify bool) ConsumerOption {
 	}
 }
 
-// WithSASLPlain aktifkan SASL PLAIN
+// WithSASLPlain enables SASL PLAIN.
 func WithSASLPlain(username, password string) ConsumerOption {
 	return func(cfg *sarama.Config) {
 		cfg.Net.SASL.Enable = true
@@ -227,8 +227,8 @@ func WithSASLPlain(username, password string) ConsumerOption {
 
 // ---------- ENV helper ----------
 
-// NewConsumerFromEnv membuat consumer dari environment variables (prefixable).
-// Contoh variabel (prefix "KAFKA_"):
+// NewConsumerFromEnv creates a consumer from environment variables (prefixable).
+// Example variables (prefix "KAFKA_"):
 // - KAFKA_BROKERS=host1:9092,host2:9092
 // - KAFKA_CLIENT_ID=my-app
 // - KAFKA_VERSION=2.8.0

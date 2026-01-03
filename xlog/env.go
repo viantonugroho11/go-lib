@@ -8,11 +8,11 @@ import (
 	"go.uber.org/zap"
 )
 
-// InitFromEnv menginisialisasi logger dengan konfigurasi dari ENV:
+// InitFromEnv initializes the logger from ENV:
 // - LOG_LEVEL: debug|info|warn|error|dpanic|panic|fatal (default: info)
 // - LOG_FORMAT: json|console (default: json)
 // - LOG_OUTPUT: stdout|stderr|file (default: stdout)
-// - LOG_FILE_PATH: path file (default: app.log)
+// - LOG_FILE_PATH: file path (default: app.log)
 // - LOG_FILE_MAX_SIZE_MB: int (default: 100)
 // - LOG_FILE_MAX_BACKUPS: int (default: 3)
 // - LOG_FILE_MAX_AGE_DAYS: int (default: 28)
@@ -73,7 +73,7 @@ func InitFromEnv() (*zap.Logger, func(), error) {
 	return Init(opts...)
 }
 
-// MustInitFromEnv panic jika inisialisasi gagal.
+// MustInitFromEnv panics if initialization fails.
 func MustInitFromEnv() (*zap.Logger, func()) {
 	l, c, err := InitFromEnv()
 	if err != nil {

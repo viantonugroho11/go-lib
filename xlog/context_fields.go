@@ -4,11 +4,11 @@ import (
 	"context"
 )
 
-// contextFieldExtractor memungkinkan pengguna meng-inject extractor field berbasis context.
+// contextFieldExtractor allows users to inject a context-based field extractor.
 var contextFieldExtractor func(context.Context) []Field
 
-// SetContextFieldExtractor menetapkan extractor field dari context.
-// Contoh: request-id, user-id, trace-id, dsb.
+// SetContextFieldExtractor sets the field extractor from context.
+// Examples: request-id, user-id, trace-id, etc.
 func SetContextFieldExtractor(fn func(context.Context) []Field) {
 	contextFieldExtractor = fn
 }
@@ -17,14 +17,14 @@ func populateContextFields(ctx context.Context) []Field {
 	if contextFieldExtractor != nil {
 		return contextFieldExtractor(ctx)
 	}
-	// default: tidak ada field tambahan
+	// default: no additional fields
 	return []Field{
-		// contoh opsional: tambahkan level agar konsisten (dilepas agar netral)
+		// optional example: add standardized fields here if needed
 		// Str("logger", "xlog"),
 	}
 }
 
-// Convenience loggers dengan context
+// Convenience logging helpers with context
 func Info(ctx context.Context, message string, fields ...Field) {
 	Logger().With(populateContextFields(ctx)...).Info(message, fields...)
 }

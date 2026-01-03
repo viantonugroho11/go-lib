@@ -10,9 +10,9 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// Init menginisialisasi logger global berbasis zap sesuai Option yang diberikan.
-// Mengembalikan logger, fungsi cleanup, dan error jika ada.
-// Cleanup akan memanggil Sync() dan mengembalikan konfigurasi stdlog seperti semula.
+// Init initializes a global zap-based logger according to the given Options.
+// Returns the logger, a cleanup function, and an error if any.
+// Cleanup will call Sync() and restore stdlog/zap globals.
 func Init(options ...Option) (*zap.Logger, func(), error) {
 	cfg := defaultConfig()
 	for _, opt := range options {
@@ -57,7 +57,7 @@ func Init(options ...Option) (*zap.Logger, func(), error) {
 	return logger, cleanup, nil
 }
 
-// MustInit sama seperti Init namun panic jika terjadi error.
+// MustInit is like Init but panics on error.
 func MustInit(options ...Option) (*zap.Logger, func()) {
 	l, c, err := Init(options...)
 	if err != nil {
@@ -66,22 +66,22 @@ func MustInit(options ...Option) (*zap.Logger, func()) {
 	return l, c
 }
 
-// L mengembalikan global logger (non-sugared).
+// L returns the global (non-sugared) logger.
 func L() *zap.Logger {
 	return zap.L()
 }
 
-// S mengembalikan global sugared logger.
+// S returns the global sugared logger.
 func S() *zap.SugaredLogger {
 	return zap.S()
 }
 
-// Logger mengembalikan logger global (nama formal untuk L).
+// Logger returns the global (non-sugared) logger (formal name for L).
 func Logger() *zap.Logger {
 	return zap.L()
 }
 
-// SugaredLogger mengembalikan sugared logger global (nama formal untuk S).
+// SugaredLogger returns the global sugared logger (formal name for S).
 func SugaredLogger() *zap.SugaredLogger {
 	return zap.S()
 }

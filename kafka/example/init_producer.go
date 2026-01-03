@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	// Baca brokers dari ENV (fallback: localhost:9092)
+	// Read brokers from ENV (fallback: localhost:9092)
 	brokersStr := strings.TrimSpace(os.Getenv("KAFKA_BROKERS"))
 	var brokers []string
 	if brokersStr == "" {
@@ -25,13 +25,13 @@ func main() {
 		}
 	}
 
-	// Tentukan topic dari ENV (fallback: example-topic)
+	// Read topic from ENV (fallback: example-topic)
 	topic := strings.TrimSpace(os.Getenv("KAFKA_TOPIC"))
 	if topic == "" {
 		topic = "example-topic"
 	}
 
-	// Inisialisasi producer dengan opsi umum
+	// Initialize producer with typical options
 	p, err := kafka.NewProducer[string](
 		brokers,
 		topic,
@@ -49,7 +49,7 @@ func main() {
 		_ = p.Close()
 	}()
 
-	// Kirim satu pesan
+	// Send a single message
 	partition, offset, err := p.SendMessage(topic, []byte("key"), []byte("hello from example"))
 	if err != nil {
 		log.Fatalf("failed to send message: %v", err)

@@ -1,19 +1,19 @@
-# kafka (Sarama-based Producer Library)
+# kafka (Sarama-based Producer & Consumer)
 
-Library kecil untuk inisialisasi Kafka (Sarama) dan producer yang generik, optimal, serta mudah dipakai lintas proyek Go. Mendukung konfigurasi via opsi kode maupun environment variables (dengan prefix).
+Small library to bootstrap Kafka using Sarama with a generic, ergonomic, and production-friendly Producer and Consumer. Supports configuration via code options and environment variables (with a configurable prefix).
 
-## Instalasi
+## Installation
 
-Tambahkan dependensi:
+Add dependencies:
 
 ```bash
 go get github.com/IBM/sarama@v1.45.1
 go get github.com/xdg-go/scram@v1.2.0
 ```
 
-## Pemakaian Singkat
+## Quick Usage
 
-### 1) Konfigurasi via Opsi (kode)
+### 1) Configure via options (code)
 
 ```go
 import (
@@ -22,7 +22,7 @@ import (
 	"github.com/IBM/sarama"
 )
 
-// Resolver topik generik; di sini T = string
+// Generic topic resolver; here T = string
 topicResolver := func(topic string) string { return topic }
 
 producer, err := kafka.NewProducer[string](
@@ -48,9 +48,9 @@ if err != nil {
 }
 ```
 
-### 2) Konfigurasi via Environment Variables
+### 2) Configure via Environment Variables
 
-Gunakan prefix (misal `KAFKA_`) agar rapi di `.env`:
+Use a prefix (e.g., `KAFKA_`) to keep `.env` tidy:
 
 ```
 KAFKA_BROKERS=localhost:9092
@@ -62,7 +62,7 @@ KAFKA_COMPRESSION=snappy
 KAFKA_MAX_RETRY=5
 KAFKA_RETRY_BACKOFF_MS=100
 KAFKA_TIMEOUT_MS=10000
-# TLS/SASL opsional:
+# Optional TLS/SASL:
 # KAFKA_TLS_ENABLE=true
 # KAFKA_TLS_INSECURE_SKIP_VERIFY=true
 # KAFKA_SASL_ENABLE=true
@@ -71,7 +71,7 @@ KAFKA_TIMEOUT_MS=10000
 # KAFKA_SASL_PASSWORD=pass
 ```
 
-Kode:
+Code:
 
 ```go
 import "kafka"
@@ -90,15 +90,15 @@ if err != nil {
 }
 ```
 
-## Catatan
-- Default `ClientID` adalah `go-lib-kafka` jika tidak diisi.
-- Default `RequiredAcks` adalah `all`.
-- Jika `Idempotent = true`, maka acks otomatis diset `all`.
-- Mendukung SASL `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512` dan TLS (opsional).
+## Notes
+- Default `ClientID` is `go-lib-kafka` if not set.
+- Default `RequiredAcks` is `all`.
+- If `Idempotent = true`, acks will be forced to `all`.
+- Supports SASL `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512` and optional TLS.
 
 ## Consumer
 
-### Init via kode
+### Init via code
 
 ```go
 import (
@@ -108,7 +108,7 @@ import (
 )
 
 handler := func(ctx context.Context, msg *sarama.ConsumerMessage) error {
-	// proses message manual
+	// manually process the message
 	return nil
 }
 
@@ -133,8 +133,8 @@ KAFKA_BROKERS=localhost:9092
 KAFKA_CLIENT_ID=my-consumer
 KAFKA_VERSION=2.8.0
 KAFKA_OFFSET_INITIAL=oldest # atau newest
-KAFKA_REBALANCE_STRATEGY=range # atau round_robin, sticky
-# TLS/SASL opsional (PLAIN):
+KAFKA_REBALANCE_STRATEGY=range # or round_robin, sticky
+# Optional TLS/SASL (PLAIN):
 # KAFKA_TLS_ENABLE=true
 # KAFKA_TLS_INSECURE_SKIP_VERIFY=true
 # KAFKA_SASL_ENABLE=true
@@ -168,7 +168,7 @@ type OrderCreated struct {
 }
 
 typed := func(ctx context.Context, msg *sarama.ConsumerMessage, evt OrderCreated) error {
-	// evt sudah ter-unmarshal
+	// evt is already unmarshaled
 	return nil
 }
 

@@ -7,22 +7,22 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// Option adalah fungsi opsional untuk mengubah konfigurasi logger.
+// Option is a functional option that mutates logger configuration.
 type Option func(cfg *Config)
 
-// OutputMode menentukan ke mana log ditulis.
+// OutputMode determines where logs are written.
 type OutputMode string
 
 const (
-	// OutputStdout menulis log ke stdout.
+	// OutputStdout writes logs to stdout.
 	OutputStdout OutputMode = "stdout"
-	// OutputStderr menulis log ke stderr.
+	// OutputStderr writes logs to stderr.
 	OutputStderr OutputMode = "stderr"
-	// OutputFile menulis log ke file dengan dukungan rotation.
+	// OutputFile writes logs to a file with rotation support.
 	OutputFile OutputMode = "file"
 )
 
-// FileRotation mengatur kebijakan rotasi file log.
+// FileRotation configures file log rotation policy.
 type FileRotation struct {
 	Path       string
 	MaxSizeMB  int
@@ -31,28 +31,28 @@ type FileRotation struct {
 	Compress   bool
 }
 
-// SamplingConfig untuk mengurangi spam log di trafik tinggi.
+// SamplingConfig reduces log spam under high traffic.
 type SamplingConfig struct {
 	Enabled    bool
 	Initial    int
 	Thereafter int
 }
 
-// Config adalah konfigurasi utama logger.
+// Config is the primary logger configuration.
 type Config struct {
 	Level             string
-	Format            string // "json" atau "console"
+	Format            string // "json" or "console"
 	Output            OutputMode
 	File              FileRotation
 	AddCaller         bool
 	Development       bool
 	Sampling          SamplingConfig
-	StacktraceLevel   string // contoh: "error"
+	StacktraceLevel   string // e.g. "error"
 	TimeFieldKey      string // default "ts"
-	TimeEncoderLayout string // contoh: time.RFC3339Nano, kosong => zap default
+	TimeEncoderLayout string // e.g. time.RFC3339Nano, empty => zap default
 }
 
-// defaultConfig mengembalikan konfigurasi produksi yang "optimal".
+// defaultConfig returns an "optimal" production configuration.
 func defaultConfig() *Config {
 	return &Config{
 		Level:  "info",
@@ -78,42 +78,42 @@ func defaultConfig() *Config {
 	}
 }
 
-// WithLevel mengatur level log (debug, info, warn, error, dpanic, panic, fatal).
+// WithLevel sets log level (debug, info, warn, error, dpanic, panic, fatal).
 func WithLevel(level string) Option {
 	return func(cfg *Config) {
 		cfg.Level = level
 	}
 }
 
-// WithJSONFormat mengatur format JSON.
+// WithJSONFormat sets JSON encoding.
 func WithJSONFormat() Option {
 	return func(cfg *Config) {
 		cfg.Format = "json"
 	}
 }
 
-// WithConsoleFormat mengatur format console (human-readable).
+// WithConsoleFormat sets console (human-readable) encoding.
 func WithConsoleFormat() Option {
 	return func(cfg *Config) {
 		cfg.Format = "console"
 	}
 }
 
-// WithOutputStdout mengatur output ke stdout.
+// WithOutputStdout sets output to stdout.
 func WithOutputStdout() Option {
 	return func(cfg *Config) {
 		cfg.Output = OutputStdout
 	}
 }
 
-// WithOutputStderr mengatur output ke stderr.
+// WithOutputStderr sets output to stderr.
 func WithOutputStderr() Option {
 	return func(cfg *Config) {
 		cfg.Output = OutputStderr
 	}
 }
 
-// WithOutputFile mengatur output ke file dengan detail rotasi.
+// WithOutputFile sets output to a file with rotation details.
 func WithOutputFile(path string, maxSizeMB, maxBackups, maxAgeDays int, compress bool) Option {
 	return func(cfg *Config) {
 		cfg.Output = OutputFile
@@ -125,21 +125,21 @@ func WithOutputFile(path string, maxSizeMB, maxBackups, maxAgeDays int, compress
 	}
 }
 
-// WithAddCaller menambahkan informasi caller (file:line) di log.
+// WithAddCaller toggles caller info (file:line).
 func WithAddCaller(enable bool) Option {
 	return func(cfg *Config) {
 		cfg.AddCaller = enable
 	}
 }
 
-// WithDevelopment mengaktifkan mode development (stacktrace lebih agresif, dsb).
+// WithDevelopment enables development mode (more aggressive stacktraces, etc.).
 func WithDevelopment(enable bool) Option {
 	return func(cfg *Config) {
 		cfg.Development = enable
 	}
 }
 
-// WithSampling mengatur sampling log.
+// WithSampling configures log sampling.
 func WithSampling(initial, thereafter int) Option {
 	return func(cfg *Config) {
 		cfg.Sampling.Enabled = true
@@ -148,28 +148,28 @@ func WithSampling(initial, thereafter int) Option {
 	}
 }
 
-// WithoutSampling menonaktifkan sampling.
+// WithoutSampling disables sampling.
 func WithoutSampling() Option {
 	return func(cfg *Config) {
 		cfg.Sampling.Enabled = false
 	}
 }
 
-// WithStacktraceLevel mengatur level stacktrace (mis: "error").
+// WithStacktraceLevel sets the stacktrace level (e.g., "error").
 func WithStacktraceLevel(level string) Option {
 	return func(cfg *Config) {
 		cfg.StacktraceLevel = level
 	}
 }
 
-// WithTimeEncoderLayout mengatur layout waktu.
+// WithTimeEncoderLayout sets the time layout.
 func WithTimeEncoderLayout(layout string) Option {
 	return func(cfg *Config) {
 		cfg.TimeEncoderLayout = layout
 	}
 }
 
-// WithTimeFieldKey mengatur nama field waktu.
+// WithTimeFieldKey sets the time field key.
 func WithTimeFieldKey(key string) Option {
 	return func(cfg *Config) {
 		cfg.TimeFieldKey = key
@@ -178,7 +178,7 @@ func WithTimeFieldKey(key string) Option {
 
 type Field = zapcore.Field
 
-// Error melakukan logging error pada logger global dengan dukungan field dari context.
+// Error logs an error using the global logger with context-derived fields.
 func Error(ctx context.Context, message string, fields ...Field) {
 	Logger().With(populateContextFields(ctx)...).Error(message, fields...)
 }

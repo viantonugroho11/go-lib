@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// Helper pembuat Field agar kustomisasi field mudah dan eksplisit.
+// Field helpers for concise and explicit field customization.
 func Str(key, val string) Field               { return zap.String(key, val) }
 func Bool(key string, val bool) Field         { return zap.Bool(key, val) }
 func Int(key string, val int) Field           { return zap.Int(key, val) }
