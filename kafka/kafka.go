@@ -90,9 +90,29 @@ func HeadersFromMessage(msg *sarama.ConsumerMessage) []Header {
 	return out
 }
 
+// FilterHeadersByKeys hanya mengembalikan header yang key-nya ada di keys.
+// Jika keys kosong/nil, mengembalikan nil (handler tidak bisa get header manapun).
+func FilterHeadersByKeys(headers []Header, keys []string) []Header {
+	if len(keys) == 0 || len(headers) == 0 {
+		return nil
+	}
+	allowed := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		allowed[k] = true
+	}
+	out := make([]Header, 0, len(headers))
+	for _, h := range headers {
+		if allowed[h.Key] {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 // AdaptEventHandler mengubah EventHandler[E] (interface) menjadi MessageHandler.
+// headerKeys: hanya header dengan key di slice ini yang diteruskan ke handler; bila nil/kosong, handler tidak menerima header (HeaderGet selalu kosong).
 // Commit hanya bila Progress.Status != ProgressError; bila ProgressError, return err sehingga offset tidak di-commit (retry).
-func AdaptEventHandler[E any](handler EventHandler[E], opts ...HandlerOption[E]) MessageHandler {
+func AdaptEventHandler[E any](handler EventHandler[E], headerKeys []string, opts ...HandlerOption[E]) MessageHandler {
 	cfg := &handlerConfig[E]{
 		newEvent: func() E { var zero E; return zero },
 		decode:   func(b []byte, dst *E) error { return json.Unmarshal(b, dst) },
@@ -105,7 +125,8 @@ func AdaptEventHandler[E any](handler EventHandler[E], opts ...HandlerOption[E])
 		if err := cfg.decode(msg.Value, &evt); err != nil {
 			return err
 		}
-		headers := HeadersFromMessage(msg)
+		all := HeadersFromMessage(msg)
+		headers := FilterHeadersByKeys(all, headerKeys)
 		progress := handler.Handle(ctx, evt, headers...)
 		if progress.Status == ProgressError {
 			if progress.Err != nil {
@@ -126,13 +147,24 @@ type Consumer struct {
 	wg     sync.WaitGroup
 }
 
-// ConsumerOption customizes sarama.Config before creating the consumer group.
-type ConsumerOption func(cfg *sarama.Config)
+// consumerBuildConfig dipakai saat apply ConsumerOption (sarama config + header keys untuk handler).
+type consumerBuildConfig struct {
+	cfg        *sarama.Config
+	headerKeys []string
+}
 
-// NewConsumer creates a generic consumer group for one or multiple topics.
-func NewConsumer(brokers []string, groupID string, topics []string, handler MessageHandler, options ...ConsumerOption) (*Consumer, error) {
+// ConsumerOption mengustomisasi consumer: sarama config dan/atau header keys.
+// Header keys hanya dipakai oleh NewConsumerWithHandler; hanya key yang di-set lewat WithHeaderKeys yang bisa di-get di Handle.
+type ConsumerOption interface {
+	apply(*consumerBuildConfig)
+}
+
+type consumerOptionFunc struct{ fn func(*consumerBuildConfig) }
+
+func (o *consumerOptionFunc) apply(c *consumerBuildConfig) { o.fn(c) }
+
+func defaultSaramaConfig() *sarama.Config {
 	cfg := sarama.NewConfig()
-	// Safe and common defaults
 	cfg.ClientID = "go-lib-kafka"
 	cfg.Version = sarama.V2_8_0_0
 	cfg.Consumer.Return.Errors = true
@@ -143,12 +175,20 @@ func NewConsumer(brokers []string, groupID string, topics []string, handler Mess
 	cfg.Consumer.Offsets.AutoCommit.Enable = true
 	cfg.Consumer.Offsets.AutoCommit.Interval = 1 * time.Second
 	cfg.Consumer.Offsets.Initial = sarama.OffsetNewest
+	return cfg
+}
 
+func applyConsumerOptions(c *consumerBuildConfig, options []ConsumerOption) {
 	for _, opt := range options {
-		opt(cfg)
+		opt.apply(c)
 	}
+}
 
-	group, err := sarama.NewConsumerGroup(brokers, groupID, cfg)
+// NewConsumer creates a generic consumer group for one or multiple topics.
+func NewConsumer(brokers []string, groupID string, topics []string, handler MessageHandler, options ...ConsumerOption) (*Consumer, error) {
+	c := &consumerBuildConfig{cfg: defaultSaramaConfig()}
+	applyConsumerOptions(c, options)
+	group, err := sarama.NewConsumerGroup(brokers, groupID, c.cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -166,17 +206,34 @@ func NewTypedConsumer[E any](brokers []string, groupID string, topic string, han
 	return NewConsumer(brokers, groupID, []string{topic}, adapted, options...)
 }
 
+// WithHeaderKeys meng-set key header yang diteruskan ke handler (hanya key ini yang bisa di-get di Handle).
+// Bila tidak dipanggil di options, handler tidak menerima header (HeaderGet/HeaderGetString selalu kosong).
+func WithHeaderKeys(keys ...string) ConsumerOption {
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.headerKeys = keys }}
+}
+
 // NewConsumerWithHandler membuat consumer dengan EventHandler[E] (interface, clean architecture).
-// Decoder default: JSON. Gunakan bila handler diimplementasi sebagai struct yang memenuhi EventHandler[E].
+// Decoder default: JSON. Header keys di-set lewat options (WithHeaderKeys); bila tidak di-set, handler tidak menerima header.
 func NewConsumerWithHandler[E any](brokers []string, groupID string, topic string, handler EventHandler[E], options ...ConsumerOption) (*Consumer, error) {
-	adapted := AdaptEventHandler[E](handler, WithJSONDecoder[E]())
+	c := &consumerBuildConfig{cfg: defaultSaramaConfig()}
+	applyConsumerOptions(c, options)
+	adapted := AdaptEventHandler[E](handler, c.headerKeys, WithJSONDecoder[E]())
 	return NewConsumer(brokers, groupID, []string{topic}, adapted, options...)
 }
 
 // NewConsumerWithHandlerFromEnv sama seperti NewConsumerWithHandler, konfigurasi dari env (prefix KAFKA_).
 func NewConsumerWithHandlerFromEnv[E any](envPrefix string, groupID string, topic string, handler EventHandler[E], overrides ...ConsumerOption) (*Consumer, error) {
-	adapted := AdaptEventHandler[E](handler, WithJSONDecoder[E]())
-	return NewConsumerFromEnv(envPrefix, groupID, []string{topic}, adapted, overrides...)
+	brokersStr := strings.TrimSpace(os.Getenv(envPrefix + "BROKERS"))
+	if brokersStr == "" {
+		return nil, errors.New("missing " + envPrefix + "BROKERS")
+	}
+	brokers := splitAndTrim(brokersStr)
+	opts := envToConsumerOptions(envPrefix)
+	opts = append(opts, overrides...)
+	c := &consumerBuildConfig{cfg: defaultSaramaConfig()}
+	applyConsumerOptions(c, opts)
+	adapted := AdaptEventHandler[E](handler, c.headerKeys, WithJSONDecoder[E]())
+	return NewConsumer(brokers, groupID, []string{topic}, adapted, opts...)
 }
 
 func (c *Consumer) Start(ctx context.Context) {
@@ -238,59 +295,59 @@ func (h *cgHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.
 
 // WithConsumerClientID sets the client id.
 func WithConsumerClientID(clientID string) ConsumerOption {
-	return func(cfg *sarama.Config) { cfg.ClientID = clientID }
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.cfg.ClientID = clientID }}
 }
 
 // WithConsumerVersion sets the Kafka version.
 func WithConsumerVersion(version sarama.KafkaVersion) ConsumerOption {
-	return func(cfg *sarama.Config) { cfg.Version = version }
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.cfg.Version = version }}
 }
 
 // WithInitialOffset chooses the initial offset (Newest/Oldest).
 func WithInitialOffset(offset int64) ConsumerOption {
-	return func(cfg *sarama.Config) { cfg.Consumer.Offsets.Initial = offset }
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.cfg.Consumer.Offsets.Initial = offset }}
 }
 
 // WithRebalanceStrategy chooses the rebalance strategy.
 func WithRebalanceStrategy(strategy sarama.BalanceStrategy) ConsumerOption {
-	return func(cfg *sarama.Config) { cfg.Consumer.Group.Rebalance.Strategy = strategy }
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.cfg.Consumer.Group.Rebalance.Strategy = strategy }}
 }
 
 // WithGroupSessionTimeout sets the session timeout.
 func WithGroupSessionTimeout(d time.Duration) ConsumerOption {
-	return func(cfg *sarama.Config) { cfg.Consumer.Group.Session.Timeout = d }
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.cfg.Consumer.Group.Session.Timeout = d }}
 }
 
 // WithGroupHeartbeatInterval sets the heartbeat interval.
 func WithGroupHeartbeatInterval(d time.Duration) ConsumerOption {
-	return func(cfg *sarama.Config) { cfg.Consumer.Group.Heartbeat.Interval = d }
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.cfg.Consumer.Group.Heartbeat.Interval = d }}
 }
 
 // WithNetTimeouts sets dial/read/write timeouts.
 func WithNetTimeouts(dial, read, write time.Duration) ConsumerOption {
-	return func(cfg *sarama.Config) {
-		cfg.Net.DialTimeout = dial
-		cfg.Net.ReadTimeout = read
-		cfg.Net.WriteTimeout = write
-	}
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) {
+		c.cfg.Net.DialTimeout = dial
+		c.cfg.Net.ReadTimeout = read
+		c.cfg.Net.WriteTimeout = write
+	}}
 }
 
 // WithTLSEnable enables TLS; if insecureSkipVerify is true, certificate verification is skipped.
 func WithTLSEnable(insecureSkipVerify bool) ConsumerOption {
-	return func(cfg *sarama.Config) {
-		cfg.Net.TLS.Enable = true
-		cfg.Net.TLS.Config = &tls.Config{InsecureSkipVerify: insecureSkipVerify} //nolint:gosec
-	}
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) {
+		c.cfg.Net.TLS.Enable = true
+		c.cfg.Net.TLS.Config = &tls.Config{InsecureSkipVerify: insecureSkipVerify} //nolint:gosec
+	}}
 }
 
 // WithSASLPlain enables SASL PLAIN.
 func WithSASLPlain(username, password string) ConsumerOption {
-	return func(cfg *sarama.Config) {
-		cfg.Net.SASL.Enable = true
-		cfg.Net.SASL.User = username
-		cfg.Net.SASL.Password = password
-		cfg.Net.SASL.Mechanism = sarama.SASLTypePlaintext
-	}
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) {
+		c.cfg.Net.SASL.Enable = true
+		c.cfg.Net.SASL.User = username
+		c.cfg.Net.SASL.Password = password
+		c.cfg.Net.SASL.Mechanism = sarama.SASLTypePlaintext
+	}}
 }
 
 // ---------- ENV helper ----------
@@ -308,24 +365,17 @@ func WithSASLPlain(username, password string) ConsumerOption {
 // - KAFKA_SASL_MECHANISM=PLAIN
 // - KAFKA_SASL_USERNAME=user
 // - KAFKA_SASL_PASSWORD=pass
-func NewConsumerFromEnv(brokersEnvPrefix string, groupID string, topics []string, handler MessageHandler, overrides ...ConsumerOption) (*Consumer, error) {
-	brokersStr := strings.TrimSpace(os.Getenv(brokersEnvPrefix + "BROKERS"))
-	if brokersStr == "" {
-		return nil, errors.New("missing " + brokersEnvPrefix + "BROKERS")
-	}
-	brokers := splitAndTrim(brokersStr)
-
+func envToConsumerOptions(envPrefix string) []ConsumerOption {
 	opts := make([]ConsumerOption, 0, 8)
-
-	if v := strings.TrimSpace(os.Getenv(brokersEnvPrefix + "CLIENT_ID")); v != "" {
+	if v := strings.TrimSpace(os.Getenv(envPrefix + "CLIENT_ID")); v != "" {
 		opts = append(opts, WithConsumerClientID(v))
 	}
-	if v := strings.TrimSpace(os.Getenv(brokersEnvPrefix + "VERSION")); v != "" {
+	if v := strings.TrimSpace(os.Getenv(envPrefix + "VERSION")); v != "" {
 		if ver, err := sarama.ParseKafkaVersion(v); err == nil {
 			opts = append(opts, WithConsumerVersion(ver))
 		}
 	}
-	if v := strings.TrimSpace(os.Getenv(brokersEnvPrefix + "OFFSET_INITIAL")); v != "" {
+	if v := strings.TrimSpace(os.Getenv(envPrefix + "OFFSET_INITIAL")); v != "" {
 		switch strings.ToLower(v) {
 		case "oldest":
 			opts = append(opts, WithInitialOffset(sarama.OffsetOldest))
@@ -333,7 +383,7 @@ func NewConsumerFromEnv(brokersEnvPrefix string, groupID string, topics []string
 			opts = append(opts, WithInitialOffset(sarama.OffsetNewest))
 		}
 	}
-	if v := strings.TrimSpace(os.Getenv(brokersEnvPrefix + "REBALANCE_STRATEGY")); v != "" {
+	if v := strings.TrimSpace(os.Getenv(envPrefix + "REBALANCE_STRATEGY")); v != "" {
 		switch strings.ToLower(v) {
 		case "round_robin":
 			opts = append(opts, WithRebalanceStrategy(sarama.BalanceStrategyRoundRobin))
@@ -343,25 +393,28 @@ func NewConsumerFromEnv(brokersEnvPrefix string, groupID string, topics []string
 			opts = append(opts, WithRebalanceStrategy(sarama.BalanceStrategyRange))
 		}
 	}
-	// TLS
-	if b := parseBool(os.Getenv(brokersEnvPrefix + "TLS_ENABLE")); b {
-		insecure := parseBool(os.Getenv(brokersEnvPrefix + "TLS_INSECURE_SKIP_VERIFY"))
+	if b := parseBool(os.Getenv(envPrefix + "TLS_ENABLE")); b {
+		insecure := parseBool(os.Getenv(envPrefix + "TLS_INSECURE_SKIP_VERIFY"))
 		opts = append(opts, WithTLSEnable(insecure))
 	}
-	// SASL (PLAIN only)
-	if b := parseBool(os.Getenv(brokersEnvPrefix + "SASL_ENABLE")); b {
-		mech := strings.ToUpper(strings.TrimSpace(os.Getenv(brokersEnvPrefix + "SASL_MECHANISM")))
-		user := os.Getenv(brokersEnvPrefix + "SASL_USERNAME")
-		pass := os.Getenv(brokersEnvPrefix + "SASL_PASSWORD")
+	if b := parseBool(os.Getenv(envPrefix + "SASL_ENABLE")); b {
+		mech := strings.ToUpper(strings.TrimSpace(os.Getenv(envPrefix + "SASL_MECHANISM")))
+		user := os.Getenv(envPrefix + "SASL_USERNAME")
+		pass := os.Getenv(envPrefix + "SASL_PASSWORD")
 		if mech == "" || mech == "PLAIN" {
 			opts = append(opts, WithSASLPlain(user, pass))
-		} else {
-			return nil, errors.New("unsupported SASL mechanism: " + mech + " (only PLAIN supported)")
 		}
 	}
-	// overrides terakhir
-	opts = append(opts, overrides...)
+	return opts
+}
 
+func NewConsumerFromEnv(brokersEnvPrefix string, groupID string, topics []string, handler MessageHandler, overrides ...ConsumerOption) (*Consumer, error) {
+	brokersStr := strings.TrimSpace(os.Getenv(brokersEnvPrefix + "BROKERS"))
+	if brokersStr == "" {
+		return nil, errors.New("missing " + brokersEnvPrefix + "BROKERS")
+	}
+	brokers := splitAndTrim(brokersStr)
+	opts := append(envToConsumerOptions(brokersEnvPrefix), overrides...)
 	return NewConsumer(brokers, groupID, topics, handler, opts...)
 }
 

@@ -1,9 +1,6 @@
 package kafka
 
-import (
-	"context"
-	"strings"
-)
+import "context"
 
 // Header represents a key-value pair found in Kafka message headers.
 type Header struct {
