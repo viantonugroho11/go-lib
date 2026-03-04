@@ -22,6 +22,13 @@ type MessageHandler func(ctx context.Context, msg *sarama.ConsumerMessage) error
 // The original msg is still provided in case key/headers/metadata are needed.
 type TypedMessageHandler[E any] func(ctx context.Context, msg *sarama.ConsumerMessage, evt E) error
 
+// EventsConsumer adalah antarmuka minimal untuk konsumer
+// yang bisa di-start dan di-close, agar mudah dipakai di main/handlers.
+type EventsConsumer interface {
+	Start(ctx context.Context)
+	Close() error
+}
+
 // HandlerOption configures how to initialize and decode typed events E.
 type HandlerOption[E any] func(*handlerConfig[E])
 
@@ -69,6 +76,47 @@ func AdaptTypedHandler[E any](th TypedMessageHandler[E], opts ...HandlerOption[E
 	}
 }
 
+// HeadersFromMessage mengubah header sarama menjadi []Header (untuk dipakai di EventHandler).
+func HeadersFromMessage(msg *sarama.ConsumerMessage) []Header {
+	if len(msg.Headers) == 0 {
+		return nil
+	}
+	out := make([]Header, 0, len(msg.Headers))
+	for _, h := range msg.Headers {
+		if h != nil {
+			out = append(out, Header{Key: string(h.Key), Value: h.Value})
+		}
+	}
+	return out
+}
+
+// AdaptEventHandler mengubah EventHandler[E] (interface) menjadi MessageHandler.
+// Commit hanya bila Progress.Status != ProgressError; bila ProgressError, return err sehingga offset tidak di-commit (retry).
+func AdaptEventHandler[E any](handler EventHandler[E], opts ...HandlerOption[E]) MessageHandler {
+	cfg := &handlerConfig[E]{
+		newEvent: func() E { var zero E; return zero },
+		decode:   func(b []byte, dst *E) error { return json.Unmarshal(b, dst) },
+	}
+	for _, o := range opts {
+		o(cfg)
+	}
+	return func(ctx context.Context, msg *sarama.ConsumerMessage) error {
+		evt := cfg.newEvent()
+		if err := cfg.decode(msg.Value, &evt); err != nil {
+			return err
+		}
+		headers := HeadersFromMessage(msg)
+		progress := handler.Handle(ctx, evt, headers...)
+		if progress.Status == ProgressError {
+			if progress.Err != nil {
+				return progress.Err
+			}
+			return errors.New(progress.Result)
+		}
+		return nil
+	}
+}
+
 type Consumer struct {
 	group   sarama.ConsumerGroup
 	topics  []string
@@ -109,6 +157,26 @@ func NewConsumer(brokers []string, groupID string, topics []string, handler Mess
 		topics:  topics,
 		handler: handler,
 	}, nil
+}
+
+// NewTypedConsumer menyederhanakan pembuatan konsumer untuk 1 topic
+// dengan handler bertipe E (default decoder: JSON).
+func NewTypedConsumer[E any](brokers []string, groupID string, topic string, handler TypedMessageHandler[E], options ...ConsumerOption) (*Consumer, error) {
+	adapted := AdaptTypedHandler[E](handler, WithJSONDecoder[E]())
+	return NewConsumer(brokers, groupID, []string{topic}, adapted, options...)
+}
+
+// NewConsumerWithHandler membuat consumer dengan EventHandler[E] (interface, clean architecture).
+// Decoder default: JSON. Gunakan bila handler diimplementasi sebagai struct yang memenuhi EventHandler[E].
+func NewConsumerWithHandler[E any](brokers []string, groupID string, topic string, handler EventHandler[E], options ...ConsumerOption) (*Consumer, error) {
+	adapted := AdaptEventHandler[E](handler, WithJSONDecoder[E]())
+	return NewConsumer(brokers, groupID, []string{topic}, adapted, options...)
+}
+
+// NewConsumerWithHandlerFromEnv sama seperti NewConsumerWithHandler, konfigurasi dari env (prefix KAFKA_).
+func NewConsumerWithHandlerFromEnv[E any](envPrefix string, groupID string, topic string, handler EventHandler[E], overrides ...ConsumerOption) (*Consumer, error) {
+	adapted := AdaptEventHandler[E](handler, WithJSONDecoder[E]())
+	return NewConsumerFromEnv(envPrefix, groupID, []string{topic}, adapted, overrides...)
 }
 
 func (c *Consumer) Start(ctx context.Context) {
@@ -295,6 +363,13 @@ func NewConsumerFromEnv(brokersEnvPrefix string, groupID string, topics []string
 	opts = append(opts, overrides...)
 
 	return NewConsumer(brokers, groupID, topics, handler, opts...)
+}
+
+// NewTypedConsumerFromEnv sama seperti NewConsumerFromEnv, tetapi untuk 1 topic
+// dan langsung menerima TypedMessageHandler[E] (default decoder: JSON).
+func NewTypedConsumerFromEnv[E any](envPrefix string, groupID string, topic string, handler TypedMessageHandler[E], overrides ...ConsumerOption) (*Consumer, error) {
+	adapted := AdaptTypedHandler[E](handler, WithJSONDecoder[E]())
+	return NewConsumerFromEnv(envPrefix, groupID, []string{topic}, adapted, overrides...)
 }
 
 // helpers
