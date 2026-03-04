@@ -66,7 +66,7 @@ func (p *Progress) SetError(err error) {
 }
 
 // EventHandler adalah interface untuk handler event (clean architecture: domain).
-// Implementasi di layer application/use-case; package kafka hanya bergantung pada interface ini.
+// headers bersifat variadic; bila handler tidak butuh header, abaikan saja parameter headers.
 type EventHandler[E any] interface {
 	Handle(ctx context.Context, evt E, headers ...Header) Progress
 	Name() string

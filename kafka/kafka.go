@@ -212,8 +212,8 @@ func WithHeaderKeys(keys ...string) ConsumerOption {
 	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.headerKeys = keys }}
 }
 
-// NewConsumerWithHandler membuat consumer dengan EventHandler[E] (interface, clean architecture).
-// Decoder default: JSON. Header keys di-set lewat options (WithHeaderKeys); bila tidak di-set, handler tidak menerima header.
+// NewConsumerWithHandler membuat consumer dengan EventHandler[E]. Decoder default: JSON.
+// Bila handler butuh header, set key lewat options (WithHeaderKeys); bila tidak, abaikan atau headers akan kosong.
 func NewConsumerWithHandler[E any](brokers []string, groupID string, topic string, handler EventHandler[E], options ...ConsumerOption) (*Consumer, error) {
 	c := &consumerBuildConfig{cfg: defaultSaramaConfig()}
 	applyConsumerOptions(c, options)
