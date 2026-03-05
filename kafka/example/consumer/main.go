@@ -18,13 +18,8 @@ func main() {
 		log.Printf("consumed topic=%s key=%s id=%s amount=%d", msg.Topic, string(msg.Key), evt.ID, evt.Amount)
 		return nil
 	}
-	handler := kafka.AdaptTypedHandler[OrderCreated](
-		typed,
-		kafka.WithJSONDecoder[OrderCreated](),
-	)
-
-	// Set ENV KAFKA_* sesuai README sebelum menjalankan
-	c, err := kafka.NewConsumerFromEnv("KAFKA_", "example-group", []string{"orders"}, handler)
+	// Set KAFKA_BROKERS etc. before run (see README).
+	c, err := kafka.NewTypedConsumerFromEnv[OrderCreated]("KAFKA_", "example-group", "orders", typed)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -8,8 +8,8 @@ type Header struct {
 	Value []byte
 }
 
-// HeaderGet mengembalikan value header pertama dengan key yang cocok (case-sensitive). Nilai nil jika tidak ada.
-func HeaderGet(headers []Header, key string) []byte {
+// GetHeader returns the first header value for the given key (case-sensitive), or nil if not found.
+func GetHeader(headers []Header, key string) []byte {
 	for _, h := range headers {
 		if h.Key == key {
 			return h.Value
@@ -18,23 +18,23 @@ func HeaderGet(headers []Header, key string) []byte {
 	return nil
 }
 
-// HeaderGetString sama seperti HeaderGet tetapi mengembalikan string. Kosong jika tidak ada.
-func HeaderGetString(headers []Header, key string) string {
-	b := HeaderGet(headers, key)
+// GetHeaderString returns the first header value as string for the given key, or empty string if not found.
+func GetHeaderString(headers []Header, key string) string {
+	b := GetHeader(headers, key)
 	if b == nil {
 		return ""
 	}
 	return string(b)
 }
 
-// ProgressStatus menyatakan hasil pemrosesan satu event (clean architecture: domain).
+// ProgressStatus is the result of processing one event.
 type ProgressStatus int
 
 const (
 	ProgressSuccess ProgressStatus = iota
-	ProgressSkip    // skip tanpa retry, offset di-commit
-	ProgressDrop    // drop tanpa retry, offset di-commit
-	ProgressError   // error, offset tidak di-commit (akan retry)
+	ProgressSkip    // commit offset, do not retry
+	ProgressDrop    // commit offset, do not retry
+	ProgressError   // do not commit; message will be retried
 )
 
 func (s ProgressStatus) String() string {
@@ -52,7 +52,7 @@ func (s ProgressStatus) String() string {
 	}
 }
 
-// Progress hasil pemrosesan satu event oleh EventHandler.
+// Progress holds the result of handling one event.
 type Progress struct {
 	Status ProgressStatus
 	Result string
@@ -60,13 +60,12 @@ type Progress struct {
 	Stage  string
 }
 
-// SetError mengisi Err dan optional Stage (untuk observability).
+// SetError sets Err and optionally Stage for observability.
 func (p *Progress) SetError(err error) {
 	p.Err = err
 }
 
-// EventHandler adalah interface untuk handler event (clean architecture: domain).
-// headers bersifat variadic; bila handler tidak butuh header, abaikan saja parameter headers.
+// EventHandler processes events of type E. Variadic headers may be ignored if not needed.
 type EventHandler[E any] interface {
 	Handle(ctx context.Context, evt E, headers ...Header) Progress
 	Name() string
