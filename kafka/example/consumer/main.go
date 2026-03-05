@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"strings"
 
-	"github.com/IBM/sarama"
 	"kafka"
 )
 
@@ -13,13 +14,25 @@ type OrderCreated struct {
 	Amount int    `json:"amount"`
 }
 
+type orderHandler struct{}
+
+func (orderHandler) Name() string { return "order" }
+
+func (orderHandler) Handle(ctx context.Context, evt OrderCreated, _ ...kafka.Header) kafka.Progress {
+	log.Printf("consumed id=%s amount=%d", evt.ID, evt.Amount)
+	return kafka.Progress{Status: kafka.ProgressSuccess}
+}
+
 func main() {
-	typed := func(ctx context.Context, msg *sarama.ConsumerMessage, evt OrderCreated) error {
-		log.Printf("consumed topic=%s key=%s id=%s amount=%d", msg.Topic, string(msg.Key), evt.ID, evt.Amount)
-		return nil
+	brokersStr := os.Getenv("KAFKA_BROKERS")
+	if brokersStr == "" {
+		brokersStr = "localhost:9092"
 	}
-	// Set KAFKA_BROKERS etc. before run (see README).
-	c, err := kafka.NewTypedConsumerFromEnv[OrderCreated]("KAFKA_", "example-group", "orders", typed)
+	brokers := strings.Split(brokersStr, ",")
+	for i := range brokers {
+		brokers[i] = strings.TrimSpace(brokers[i])
+	}
+	c, err := kafka.NewConsumer[OrderCreated](brokers, "example-group", "orders", orderHandler{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -28,5 +41,3 @@ func main() {
 	c.Start(context.Background())
 	select {}
 }
-
-

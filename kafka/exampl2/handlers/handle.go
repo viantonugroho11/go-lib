@@ -54,15 +54,11 @@ func (h RepaymentHandler) Handle(ctx context.Context, evt RepaymentEvent, header
 
 // NewOrderConsumer returns a Consumer for OrderEvent with OrderHandler.
 func NewOrderConsumer(brokers []string, groupID, topic string, opts ...kafka.ConsumerOption) (kafka.Consumer, error) {
-	return kafka.NewConsumerWithHandler[OrderEvent](brokers, groupID, topic, OrderHandler{}, opts...)
+	return kafka.NewConsumer[OrderEvent](brokers, groupID, topic, OrderHandler{}, opts...)
 }
 
 // NewRepaymentConsumer returns a Consumer for RepaymentEvent with RepaymentHandler.
 func NewRepaymentConsumer(brokers []string, groupID, topic string, opts ...kafka.ConsumerOption) (kafka.Consumer, error) {
-	return kafka.NewConsumerWithHandler[RepaymentEvent](brokers, groupID, topic, RepaymentHandler{}, opts...)
+	return kafka.NewConsumer[RepaymentEvent](brokers, groupID, topic, RepaymentHandler{}, opts...)
 }
 
-// NewOrderConsumerFromEnv returns a Consumer for orders topic from env (e.g. KAFKA_BROKERS).
-func NewOrderConsumerFromEnv(envPrefix string, opts ...kafka.ConsumerOption) (kafka.Consumer, error) {
-	return kafka.NewConsumerWithHandlerFromEnv[OrderEvent](envPrefix, "example-group", "orders", OrderHandler{}, opts...)
-}
