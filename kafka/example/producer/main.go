@@ -1,3 +1,4 @@
+// Example producer: one topic, one message type. Uses Publish and PublishMany with optional WithKey.
 package main
 
 import (
@@ -36,13 +37,11 @@ func main() {
 		topic = "orders"
 	}
 
-	// One producer: one topic + one message type. Key per message via WithKeyFunc (e.g. partition by ID).
+	// NewProducer[T]: one topic + one message type. Optional key via WithKey (applied to all messages).
 	p, err := kafka.NewProducer[OrderCreated](
 		brokers,
 		topic,
-		kafka.WithKeyFunc[OrderCreated](func(req OrderCreated) []byte {
-			return []byte(req.ID)
-		}),
+		kafka.WithKey([]byte("orders-partition-key")),
 		kafka.WithAcks(sarama.WaitForAll),
 		kafka.WithIdempotent(),
 		kafka.WithRetryMax(3),
@@ -51,7 +50,7 @@ func main() {
 		kafka.WithTimeout(10*time.Second),
 	)
 	if err != nil {
-		log.Fatalf("failed to create producer: %v", err)
+		log.Fatalf("create producer: %v", err)
 	}
 	defer func() {
 		_ = p.Close()
@@ -59,21 +58,19 @@ func main() {
 
 	ctx := context.Background()
 
-	// Publish one event (struct is encoded to JSON by the package)
-	err = p.Publish(ctx, OrderCreated{ID: "1", Amount: 100})
-	if err != nil {
-		log.Fatalf("failed to publish: %v", err)
+	// Publish one event (struct is JSON-encoded by the package)
+	if err := p.Publish(ctx, OrderCreated{ID: "1", Amount: 100}); err != nil {
+		log.Fatalf("publish: %v", err)
 	}
 	log.Printf("published OrderCreated id=1 amount=100")
 
-	// PublishMany: send multiple events in one batch
+	// PublishMany: batch of events
 	events := []OrderCreated{
 		{ID: "2", Amount: 200},
 		{ID: "3", Amount: 300},
 	}
-	err = p.PublishMany(ctx, events)
-	if err != nil {
-		log.Fatalf("failed to publish many: %v", err)
+	if err := p.PublishMany(ctx, events); err != nil {
+		log.Fatalf("publish many: %v", err)
 	}
 	log.Printf("published %d events", len(events))
 }

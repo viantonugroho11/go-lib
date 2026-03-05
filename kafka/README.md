@@ -1,165 +1,47 @@
-# kafka (Sarama-based Producer & Consumer)
+# kafka
 
-Small library to bootstrap Kafka using Sarama with a generic, ergonomic, and production-friendly Producer and Consumer. Supports configuration via code options and environment variables (with a configurable prefix).
+Sarama-based Kafka library with a generic, interface-driven API: **Consumer** uses `EventHandler[E]`, **Producer** publishes to a single topic.
 
 ## Installation
 
-Add dependencies:
-
 ```bash
-go get github.com/IBM/sarama@v1.45.1
-go get github.com/xdg-go/scram@v1.2.0
+go get github.com/IBM/sarama
 ```
 
-## Quick Usage
-
-### 1) Configure via options (code)
-
-```go
-import (
-	"time"
-	"kafka"
-	"github.com/IBM/sarama"
-)
-
-// Generic topic resolver; here T = string
-topicResolver := func(topic string) string { return topic }
-
-producer, err := kafka.NewProducer[string](
-	[]string{"localhost:9092"},
-	topicResolver,
-	kafka.WithClientID("my-app"),
-	kafka.WithAcks(sarama.WaitForAll),
-	kafka.WithIdempotent(),
-	kafka.WithCompression(sarama.CompressionSnappy),
-	kafka.WithRetryMax(5),
-	kafka.WithRetryBackoff(100*time.Millisecond),
-	kafka.WithTimeout(10*time.Second),
-	kafka.WithVersion(sarama.V2_6_0_0),
-)
-if err != nil {
-	panic(err)
-}
-defer producer.Close()
-
-_, _, err = producer.SendMessage("my-topic", []byte("my-key"), []byte("hello world"))
-if err != nil {
-	panic(err)
-}
-```
-
-### 2) Configure via Environment Variables
-
-Use a prefix (e.g., `KAFKA_`) to keep `.env` tidy:
-
-```
-KAFKA_BROKERS=localhost:9092
-KAFKA_CLIENT_ID=my-app
-KAFKA_VERSION=3.6.0
-KAFKA_REQUIRED_ACKS=all
-KAFKA_IDEMPOTENT=true
-KAFKA_COMPRESSION=snappy
-KAFKA_MAX_RETRY=5
-KAFKA_RETRY_BACKOFF_MS=100
-KAFKA_TIMEOUT_MS=10000
-# Optional TLS/SASL:
-# KAFKA_TLS_ENABLE=true
-# KAFKA_TLS_INSECURE_SKIP_VERIFY=true
-# KAFKA_SASL_ENABLE=true
-# KAFKA_SASL_MECHANISM=SCRAM-SHA-512
-# KAFKA_SASL_USERNAME=user
-# KAFKA_SASL_PASSWORD=pass
-```
-
-Code:
-
-```go
-import "kafka"
-
-topicResolver := func(topic string) string { return topic }
-
-producer, err := kafka.NewProducerFromEnv[string]("KAFKA_", topicResolver)
-if err != nil {
-	panic(err)
-}
-defer producer.Close()
-
-_, _, err = producer.SendMessage("my-topic", []byte("key"), []byte("value"))
-if err != nil {
-	panic(err)
-}
-```
-
-## Notes
-- Default `ClientID` is `go-lib-kafka` if not set.
-- Default `RequiredAcks` is `all`.
-- If `Idempotent = true`, acks will be forced to `all`.
-- Supports SASL `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512` and optional TLS.
+---
 
 ## Consumer
 
-### Init via code
+Single constructor: **`NewConsumer[E]`** with **`EventHandler[E]`**. Events are decoded as JSON by default.
 
-```go
-import (
-	"context"
-	"kafka"
-	"github.com/IBM/sarama"
-)
+### EventHandler interface
 
-handler := func(ctx context.Context, msg *sarama.ConsumerMessage) error {
-	// manually process the message
-	return nil
-}
+Implement two methods:
 
-c, err := kafka.NewConsumer(
-	[]string{"localhost:9092"},
-	"my-group",
-	[]string{"topic-a","topic-b"},
-	handler,
-	kafka.WithConsumerClientID("my-consumer"),
-	kafka.WithInitialOffset(sarama.OffsetOldest),
-	kafka.WithRebalanceStrategy(sarama.BalanceStrategyRoundRobin),
-)
-if err != nil { panic(err) }
-defer c.Close()
-c.Start(context.Background())
-```
+- **`Handle(ctx context.Context, evt E, headers ...Header) Progress`** — process one event; return `Progress` to control commit/retry.
+- **`Name() string`** — consumer name (for logging/metrics).
 
-### Init via ENV
+The `headers` parameter only contains keys registered via **`WithHeaderKeys`** when creating the consumer; if you don't use headers, you can write `_ ...kafka.Header`.
 
-```
-KAFKA_BROKERS=localhost:9092
-KAFKA_CLIENT_ID=my-consumer
-KAFKA_VERSION=2.8.0
-KAFKA_OFFSET_INITIAL=oldest # atau newest
-KAFKA_REBALANCE_STRATEGY=range # or round_robin, sticky
-# Optional TLS/SASL (PLAIN):
-# KAFKA_TLS_ENABLE=true
-# KAFKA_TLS_INSECURE_SKIP_VERIFY=true
-# KAFKA_SASL_ENABLE=true
-# KAFKA_SASL_MECHANISM=PLAIN
-# KAFKA_SASL_USERNAME=user
-# KAFKA_SASL_PASSWORD=pass
-```
+### Progress status
 
-```go
-import (
-	"context"
-	"kafka"
-)
+| Status           | Meaning                                                |
+|------------------|--------------------------------------------------------|
+| `ProgressSuccess` | Processing succeeded; offset is committed.             |
+| `ProgressSkip`    | Skip (e.g. filter); offset committed, no retry.       |
+| `ProgressDrop`    | Drop (invalid); offset committed, no retry.           |
+| `ProgressError`   | Error; offset **not** committed, message will be retried. |
 
-handler := func(ctx context.Context, msg *sarama.ConsumerMessage) error {
-	return nil
-}
+Use **`p.SetError(err)`** to set `Err` on Progress (for observability).
 
-c, err := kafka.NewConsumerFromEnv("KAFKA_", "my-group", []string{"topic-a"}, handler)
-if err != nil { panic(err) }
-defer c.Close()
-c.Start(context.Background())
-```
+### Headers
 
-### Typed Handler (auto-unmarshal JSON)
+- When **creating the consumer**: register header keys with **`WithHeaderKeys("correlation_id", "resource")`**. Only these keys are passed to `Handle`.
+- Inside **Handle**: read values with **`kafka.GetHeaderString(headers, "correlation_id")`** or **`kafka.GetHeader(headers, "key")`** (returns `[]byte`).
+
+If you don't use **WithHeaderKeys**, the `headers` slice in `Handle` is empty.
+
+### Minimal example
 
 ```go
 type OrderCreated struct {
@@ -167,20 +49,234 @@ type OrderCreated struct {
 	Amount int    `json:"amount"`
 }
 
-typed := func(ctx context.Context, msg *sarama.ConsumerMessage, evt OrderCreated) error {
-	// evt is already unmarshaled
-	return nil
+type orderHandler struct{}
+func (orderHandler) Name() string { return "order" }
+func (orderHandler) Handle(ctx context.Context, evt OrderCreated, _ ...kafka.Header) kafka.Progress {
+	log.Printf("id=%s amount=%d", evt.ID, evt.Amount)
+	return kafka.Progress{Status: kafka.ProgressSuccess}
 }
 
-handler := kafka.AdaptTypedHandler[OrderCreated](
-	typed,
-	kafka.WithJSONDecoder[OrderCreated](),
-	// kafka.WithNewEvent(func() OrderCreated { return OrderCreated{Amount: 1} }),
+// Usage
+c, err := kafka.NewConsumer[OrderCreated](
+	[]string{"localhost:9092"},
+	"example-group",
+	"orders",
+	orderHandler{},
+	kafka.WithInitialOffset(sarama.OffsetOldest),
 )
-
-c, err := kafka.NewConsumerFromEnv("KAFKA_", "my-group", []string{"orders"}, handler)
-if err != nil { panic(err) }
 defer c.Close()
-c.Start(context.Background())
+c.Start(ctx)
 ```
 
+### Example with headers and validation (Skip/Drop/Error)
+
+```go
+func (h RepaymentHandler) Handle(ctx context.Context, evt RepaymentEvent, headers ...kafka.Header) kafka.Progress {
+	if evt.ResourceID == "" {
+		return kafka.Progress{Status: kafka.ProgressDrop, Result: "resource_id empty"}
+	}
+	correlationID := kafka.GetHeaderString(headers, "correlation_id")
+	log.Printf("resource_id=%s correlation_id=%s", evt.ResourceID, correlationID)
+	return kafka.Progress{Status: kafka.ProgressSuccess, Result: "ok"}
+}
+
+// When creating the consumer, register headers that can be read:
+c, err := kafka.NewConsumer[RepaymentEvent](brokers, groupID, topic, RepaymentHandler{},
+	kafka.WithHeaderKeys("correlation_id", "resource"),
+)
+```
+
+### Consumer options
+
+| Option | Description |
+|--------|-------------|
+| `WithHeaderKeys(keys ...string)` | Only these keys are passed to `Handle`; if not set, the handler receives no headers. |
+| `WithConsumerClientID(id string)` | Sarama client ID. |
+| `WithInitialOffset(offset)` | `sarama.OffsetNewest` or `sarama.OffsetOldest`. |
+| `WithConsumerVersion(version)` | Kafka version. |
+| `WithRebalanceStrategy(s)` | `BalanceStrategyRange`, `RoundRobin`, `Sticky`. |
+| `WithTLSEnable(skipVerify bool)` | Enable TLS. |
+| `WithSASLPlain(user, pass)` | SASL PLAIN authentication. |
+| `WithMetricRegistry(registry)` | Metric registry (e.g. `go-metrics` / Prometheus). |
+
+Brokers and other config are set in code; read from env (e.g. `os.Getenv("KAFKA_BROKERS")`) in your app if needed.
+
+---
+
+## Producer
+
+One producer is bound to **one topic** and **one message type T** (your struct). Create with **`NewProducer[T](brokers, topic, options...)`**. The package encodes T to bytes (JSON by default); you pass structs, not `[]byte`. Message key: **`WithKey(key []byte)`** for a fixed key, or **`WithKeyFunc[T](fn func(T) []byte)`** to compute the key per message (e.g. partition by ID).
+
+- **`Publish(ctx, value T, headers ...Header) error`** — encode one value and send.
+- **`PublishMany(ctx, values []T, headers ...Header) error`** — encode and send a batch.
+
+```go
+type OrderCreated struct {
+	ID     string `json:"id"`
+	Amount int    `json:"amount"`
+}
+
+p, err := kafka.NewProducer[OrderCreated](
+	[]string{"localhost:9092"},
+	"orders",
+	kafka.WithKey([]byte("partition-key")),
+	kafka.WithAcks(sarama.WaitForAll),
+	kafka.WithIdempotent(),
+	kafka.WithRetryMax(5),
+)
+defer p.Close()
+
+// Send struct; package encodes to JSON
+err = p.Publish(ctx, OrderCreated{ID: "1", Amount: 100})
+
+// Batch
+err = p.PublishMany(ctx, []OrderCreated{
+	{ID: "2", Amount: 200},
+	{ID: "3", Amount: 300},
+})
+```
+
+### Producer options
+
+| Option | Description |
+|--------|-------------|
+| `WithKey(key []byte)` | Fixed message key for all Publish/PublishMany. |
+| `WithKeyFunc[T](fn func(T) []byte)` | Key per message from value (e.g. `[]byte(req.ID)`); T must match `NewProducer[T]`. |
+| `WithRetryBackoff(d time.Duration)` | Retry backoff duration. |
+| `WithRetryMax(n int)` | Maximum number of retries. |
+| `WithAcks(acks sarama.RequiredAcks)` | Required acks. |
+| `WithIdempotent()` | Enable idempotent producer (sets acks=all). |
+| `WithCompression(codec)` | Compression codec. |
+| `WithTimeout(d time.Duration)` | Message publish timeout. |
+| `WithMaxMessageBytes(n int)` | Max message size. |
+| `WithReturnSuccesses(enable bool)` | Return successes (SyncProducer typically needs true). |
+
+---
+
+## Example: example/producer
+
+Minimal producer: one topic, one message type. Uses **Publish** (single event) and **PublishMany** (batch). Optional key via **WithKey**.
+
+**Structure:**
+
+```
+kafka/example/producer/
+  main.go
+```
+
+**`main.go` (summary):**
+
+- Event type: `OrderCreated` with `id`, `amount` (JSON).
+- **NewProducer[OrderCreated]** with brokers, topic, and options: `WithKey`, `WithAcks`, `WithIdempotent`, `WithRetryMax`, etc.
+- **Publish(ctx, value)** — send one struct; package encodes to JSON.
+- **PublishMany(ctx, values)** — send a slice of structs in one batch.
+
+**Run:**
+
+```bash
+cd kafka
+# Optional: KAFKA_BROKERS=localhost:9092 KAFKA_TOPIC=orders
+go run ./example/producer/
+```
+
+Ensure Kafka is running and the topic exists.
+
+---
+
+## Example: example/consumer
+
+Minimal example: one consumer for topic `orders` with event type `OrderCreated`.
+
+**Structure:**
+
+```
+kafka/example/consumer/
+  main.go
+```
+
+**`main.go` (summary):**
+
+- Event type: `OrderCreated` with `id`, `amount` (JSON).
+- Handler: `orderHandler` with `Name()` and `Handle(ctx, evt OrderCreated, _ ...kafka.Header) Progress` that logs and returns `ProgressSuccess`.
+- `main`: read brokers from env `KAFKA_BROKERS` (default `localhost:9092`), call `kafka.NewConsumer[OrderCreated](brokers, "example-group", "orders", orderHandler{})`, then `Start(ctx)`.
+
+**Run:**
+
+```bash
+cd kafka
+# Optional: export KAFKA_BROKERS=localhost:9092
+go run ./example/consumer/
+```
+
+Ensure Kafka is running and topic `orders` exists; create it with a producer or Kafka tools if needed.
+
+---
+
+## Example: exampl2 (multiple consumers + setup)
+
+Example with **multiple consumer types** (order, repayment) and a **setup** layer as a single initialization point.
+
+**Structure:**
+
+```
+kafka/exampl2/
+  main.go           # Entry: choose consumer via CONSUMER_NAME, then run
+  handlers/
+    handle.go       # OrderEvent, RepaymentEvent, OrderHandler, RepaymentHandler, NewOrderConsumer, NewRepaymentConsumer
+  setup/
+    setup.go        # SetupConsumer: wrapper around kafka.NewConsumer[E]
+```
+
+**handlers/handle.go**
+
+- **OrderEvent** / **RepaymentEvent**: event structs (JSON).
+- **OrderHandler**: `EventHandler[OrderEvent]`; no headers (`_ ...kafka.Header`); simple validation (e.g. empty ID → `ProgressDrop`).
+- **RepaymentHandler**: `EventHandler[RepaymentEvent]`; uses header `correlation_id` via `kafka.GetHeaderString(headers, "correlation_id")`.
+- **NewOrderConsumer** / **NewRepaymentConsumer**: call `kafka.NewConsumer[OrderEvent]` / `NewConsumer[RepaymentEvent]` with handler and options (WithInitialOffset, WithHeaderKeys).
+
+**main.go**
+
+- Read env: `KAFKA_BROKERS`, `CONSUMER_NAME`, `KAFKA_GROUP_ID`, `KAFKA_TOPIC` (defaults: order_consumer, example-group, orders).
+- Switch on `CONSUMER_NAME`:
+  - `order_consumer` → `handlers.NewOrderConsumer(..., kafka.WithInitialOffset(sarama.OffsetOldest))`
+  - `repayment_consumer` → `handlers.NewRepaymentConsumer(..., kafka.WithHeaderKeys("correlation_id", "resource"))`
+  - `order_via_setup` → `setup.SetupConsumer[handlers.OrderEvent](..., handlers.OrderHandler{}, ...)`
+  - `repayment_via_setup` → `setup.SetupConsumer[handlers.RepaymentEvent](..., handlers.RepaymentHandler{}, ...)`
+- Graceful shutdown: `signal.NotifyContext`, `c.Start(ctx)`, `<-ctx.Done()`, `c.Close()`.
+
+**setup/setup.go**
+
+- **SetupConsumer[E]** simply calls `kafka.NewConsumer[E](brokers, groupID, topic, handler, opts...)`.
+- Re-exports options (WithInitialOffset, WithStartFromOldest, etc.) so main can use them from the `setup` package if desired.
+
+**Run:**
+
+```bash
+cd kafka
+
+# Order consumer (no headers)
+CONSUMER_NAME=order_consumer go run ./exampl2/
+
+# Repayment consumer (with headers correlation_id, resource)
+CONSUMER_NAME=repayment_consumer KAFKA_TOPIC=repayments go run ./exampl2/
+
+# Same but via setup
+CONSUMER_NAME=order_via_setup go run ./exampl2/
+CONSUMER_NAME=repayment_via_setup KAFKA_TOPIC=repayments go run ./exampl2/
+```
+
+Env used: `KAFKA_BROKERS` (default localhost:9092), `CONSUMER_NAME`, `KAFKA_GROUP_ID`, `KAFKA_TOPIC`.
+
+---
+
+## Package layout
+
+| File | Contents |
+|------|----------|
+| **consumer.go** | `Consumer` interface (Start, Close), `NewConsumer[E]`, consumer group implementation. |
+| **options.go** | `ConsumerOption`, `WithHeaderKeys`, `WithInitialOffset`, TLS, SASL, MetricRegistry, etc. |
+| **handler.go** | Internal adapter: EventHandler[E] → JSON decode + header filter → Sarama handler. |
+| **model.go** | `Header`, `Progress`, `ProgressStatus`, `EventHandler[E]`, `GetHeader` / `GetHeaderString`. |
+| **producer.go** | `Producer[T]`, `NewProducer`, `Publish`, `PublishMany`, `Close`. |
+| **producer_options.go** | `ProducerOption`, `defaultProducerConfig`, `WithKey`, `WithKeyFunc`, `WithRetryBackoff`, `WithRetryMax`, `WithAcks`, `WithIdempotent`, etc. |
+| **kafka.go** | Package documentation and short example. |
