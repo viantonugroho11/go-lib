@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
-	xlog "xlog"
+	xlog "github.com/viantonugroho11/go-lib/xlog"
 )
 
 func main() {

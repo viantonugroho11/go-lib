@@ -1,4 +1,4 @@
-module xlog
+module github.com/viantonugroho11/go-lib/xlog
 
 go 1.23.4
 

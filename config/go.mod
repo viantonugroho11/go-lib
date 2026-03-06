@@ -1,4 +1,4 @@
-module config
+module github.com/viantonugroho11/go-lib/config
 
 go 1.23.8
 
