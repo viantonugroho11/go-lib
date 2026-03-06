@@ -1,8 +1,22 @@
 
+## kafka/v0.1.4 - 2026-03-06
+
+### Changes
+
+- Update module
+
+
+## kafka/v0.1.3 - 2026-03-06
+
+### Changes
+
+
+
 ## kafka/v0.1.2 - 2026-03-05
 
 ### Changes
 
+- **kafka:** update changelog for kafka/v0.1.2
 - update producer and add example
 
 
