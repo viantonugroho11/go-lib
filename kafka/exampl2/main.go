@@ -9,9 +9,9 @@ import (
 	"syscall"
 
 	"github.com/IBM/sarama"
-	"kafka"
-	"kafka/exampl2/handlers"
-	"kafka/exampl2/setup"
+	"github.com/viantonugroho11/go-lib/kafka"
+	"github.com/viantonugroho11/go-lib/kafka/exampl2/handlers"
+	"github.com/viantonugroho11/go-lib/kafka/exampl2/setup"
 )
 
 func main() {

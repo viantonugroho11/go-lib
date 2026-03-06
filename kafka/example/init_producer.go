@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"kafka"
+	"github.com/viantonugroho11/go-lib/kafka"
 
 	"github.com/IBM/sarama"
 )

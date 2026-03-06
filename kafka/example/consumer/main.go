@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"kafka"
+	"github.com/viantonugroho11/go-lib/kafka"
 )
 
 type OrderCreated struct {

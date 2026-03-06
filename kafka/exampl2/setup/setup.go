@@ -6,7 +6,7 @@ import (
 	"context"
 
 	"github.com/IBM/sarama"
-	"kafka"
+	"github.com/viantonugroho11/go-lib/kafka"
 )
 
 // SetupConsumer builds a Consumer from EventHandler[E].

@@ -4,7 +4,7 @@ import (
 	"context"
 	"log"
 
-	"kafka"
+	"github.com/viantonugroho11/go-lib/kafka"
 )
 
 // OrderEvent payload untuk topic order (contoh domain event).
