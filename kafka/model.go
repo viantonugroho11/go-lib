@@ -78,11 +78,10 @@ type EventAndHeader[E any] struct {
 }
 
 // EventProducer is an interface for publishing events.
+// Producer[E] satisfies this interface.
 type EventProducer[E any] interface {
-	// Publish publishes the given event with optional headers.
-	// It returns an error if the publishing fails.
+	// Publish encodes and sends one event with optional headers.
 	Publish(ctx context.Context, evt E, headers ...Header) error
-	// PublishMany publishes multiple events with optional headers.
-	// It returns an error if the publishing fails.
-	PublishMany(ctx context.Context, eahs ...EventAndHeader[E]) error
+	// PublishMany encodes and sends multiple events with optional shared headers.
+	PublishMany(ctx context.Context, values []E, headers ...Header) error
 }
