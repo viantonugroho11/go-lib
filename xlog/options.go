@@ -1,7 +1,6 @@
 package xlog
 
 import (
-	"context"
 	"time"
 
 	"go.uber.org/zap/zapcore"
@@ -177,8 +176,3 @@ func WithTimeFieldKey(key string) Option {
 }
 
 type Field = zapcore.Field
-
-// Error logs an error using the global logger with context-derived fields.
-func Error(ctx context.Context, message string, fields ...Field) {
-	Logger().With(populateContextFields(ctx)...).Error(message, fields...)
-}

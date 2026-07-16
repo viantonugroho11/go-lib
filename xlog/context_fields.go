@@ -23,6 +23,11 @@ func populateContextFields(ctx context.Context) []Field {
 }
 
 // Convenience logging helpers with context
+
+func Error(ctx context.Context, message string, fields ...Field) {
+	Logger().With(populateContextFields(ctx)...).Error(message, fields...)
+}
+
 func Info(ctx context.Context, message string, fields ...Field) {
 	Logger().With(populateContextFields(ctx)...).Info(message, fields...)
 }
