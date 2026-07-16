@@ -30,7 +30,7 @@ func defaultSaramaConfig() *sarama.Config {
 	cfg.Consumer.Group.Heartbeat.Interval = 3 * time.Second
 	cfg.Consumer.Group.Session.Timeout = 30 * time.Second
 	cfg.Consumer.Group.Rebalance.Timeout = 30 * time.Second
-	cfg.Consumer.Group.Rebalance.Strategy = sarama.BalanceStrategyRange
+	cfg.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRange()}
 	cfg.Consumer.Offsets.AutoCommit.Enable = true
 	cfg.Consumer.Offsets.AutoCommit.Interval = 1 * time.Second
 	cfg.Consumer.Offsets.Initial = sarama.OffsetNewest
