@@ -1,26 +1,24 @@
 
 ## kafka/v0.1.5 - 2026-07-16
 
-### Bug Fixes
-
-- **consumer:** fix deadlock in `Close()` — `group.Close()` must precede `wg.Wait()` so error goroutine can exit
-- **consumer:** prevent double option apply in `NewConsumer` — options were applied twice causing sarama config mutations to fire twice
-- **consumer:** remove unused `createConsumer` helper after refactor
-- **model:** `SetError` now sets `Status=ProgressError` — previously only stored err, causing silent offset commit
-- **model:** align `EventProducer` interface `PublishMany` signature with `Producer[T]` implementation
-
 ### Changes
 
-- **options:** remove duplicate `WithClientID`/`WithVersion` (identical to `WithConsumerClientID`/`WithConsumerVersion`)
-- **options:** replace deprecated `sarama.BalanceStrategyRange` with `NewBalanceStrategyRange()` to avoid data race
-- **options:** remove orphan comment after `WithReturnErrors`
-- **producer:** document that `ctx` is not propagated in `Publish`/`PublishMany` (sarama limitation)
+- update changelogs for kafka/v0.1.5, config/v0.1.2, xlog/v0.1.1
+- **kafka:** clarify ctx not propagated in Publish/PublishMany
+- **kafka:** replace deprecated BalanceStrategyRange with NewBalanceStrategyRange
+- **kafka:** remove duplicate WithClientID/WithVersion options and orphan comment
+- **kafka:** align EventProducer interface with Producer[T] signatures
+- **kafka:** SetError now sets Status=ProgressError
+- **kafka:** remove unused createConsumer helper
+- **kafka:** prevent double option apply in NewConsumer
+- **kafka:** fix deadlock in consumer.Close
 
 
 ## kafka/v0.1.4 - 2026-03-06
 
 ### Changes
 
+- **kafka:** update changelog for kafka/v0.1.4
 - Update module
 
 
