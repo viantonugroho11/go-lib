@@ -65,6 +65,7 @@ func (p *Producer[T]) sendRaw(key []byte, value []byte, headers ...Header) (part
 }
 
 // Publish encodes the value as JSON and sends one message. Key from WithKey or WithKeyFunc (per message).
+// ctx is accepted for interface compatibility; sarama SyncProducer does not propagate cancellation.
 func (p *Producer[T]) Publish(ctx context.Context, value T, headers ...Header) error {
 	encoded, err := p.encode(value)
 	if err != nil {
@@ -79,6 +80,7 @@ func (p *Producer[T]) Publish(ctx context.Context, value T, headers ...Header) e
 }
 
 // PublishMany encodes each value as JSON and sends messages in batch. Key from WithKey or WithKeyFunc (per message).
+// ctx is accepted for interface compatibility; sarama SyncProducer does not propagate cancellation.
 func (p *Producer[T]) PublishMany(ctx context.Context, values []T, headers ...Header) error {
 	if len(values) == 0 {
 		return nil
