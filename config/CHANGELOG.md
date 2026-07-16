@@ -1,4 +1,12 @@
 
+## config/v0.1.2 - 2026-07-16
+
+### Bug Fixes
+
+- **config:** preserve consul error when fallback to file also fails — previously consul error was silently discarded
+- **config:** fix typo "consule" in log message
+
+
 ## config/v0.1.1 - 2026-03-06
 
 ### Changes
