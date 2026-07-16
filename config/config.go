@@ -86,17 +86,17 @@ func (v *ViperLoader) Load(cfg interface{}) (err error) {
 		return ErrInvalidInput
 	}
 	if v.consulURL != "" {
-		err = v.loadFromConsul()
-		if err == nil {
+		consulErr := v.loadFromConsul()
+		if consulErr == nil {
 			err = v.Unmarshal(cfg, decOption)
 			return
 		}
+		log.Printf("consul load failed: %+v. Falling back to file and environment variables.\n", consulErr)
 	}
-	log.Printf("Can not load from consule, either consul url is not set, or an error occured: %+v. Will load configuration from file and environment variables.\n", err)
 	err = v.loadFromFileAndEnv()
 	if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-		err = fmt.Errorf("%w: no '%s' file found on search paths.", ErrConfigFileNotFound, v.configFileName)
-		return 
+		err = fmt.Errorf("%w: no '%s' file found on search paths", ErrConfigFileNotFound, v.configFileName)
+		return
 	}
 	err = v.Unmarshal(cfg, decOption)
 	return
