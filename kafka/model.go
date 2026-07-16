@@ -60,8 +60,9 @@ type Progress struct {
 	Stage  string
 }
 
-// SetError sets Err and optionally Stage for observability.
+// SetError sets Status to ProgressError and records the error.
 func (p *Progress) SetError(err error) {
+	p.Status = ProgressError
 	p.Err = err
 }
 
