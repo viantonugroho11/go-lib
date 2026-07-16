@@ -82,8 +82,9 @@ func (c *consumer) Close() error {
 	if c.cancel != nil {
 		c.cancel()
 	}
+	err := c.group.Close() // must close before wg.Wait: drains Errors() channel so error goroutine can exit
 	c.wg.Wait()
-	return c.group.Close()
+	return err
 }
 
 type cgHandler struct {
