@@ -105,22 +105,10 @@ func WithSASLPlain(username, password string) ConsumerOption {
 	}}
 }
 
-// clientID sets the client ID.
-func WithClientID(clientID string) ConsumerOption {
-	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.cfg.ClientID = clientID }}
-}
-
-// version sets the Kafka version.
-func WithVersion(version sarama.KafkaVersion) ConsumerOption {
-	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.cfg.Version = version }}
-}
-
-// returnErrors sets the return errors flag.
+// WithReturnErrors sets the return errors flag.
 func WithReturnErrors(enable bool) ConsumerOption {
 	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.cfg.Consumer.Return.Errors = enable }}
 }
-// returnErrors sets the return errors flag.
-
 
 // channelBufferSize sets the channel buffer size.
 func WithChannelBufferSize(n int) ConsumerOption {
