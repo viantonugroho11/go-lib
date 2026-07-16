@@ -26,26 +26,12 @@ type consumer struct {
 	wg     sync.WaitGroup
 }
 
-func createConsumer(brokers []string, groupID string, topics []string, handler messageHandler, options ...ConsumerOption) (Consumer, error) {
-	cfg := &consumerBuildConfig{cfg: defaultSaramaConfig()}
-	applyConsumerOptions(cfg, options)
-	group, err := sarama.NewConsumerGroup(brokers, groupID, cfg.cfg)
-	if err != nil {
-		return nil, err
-	}
-	return &consumer{
-		group:   group,
-		topics:  topics,
-		handler: handler,
-	}, nil
-}
-
 // NewConsumer creates a consumer for one topic with EventHandler[E] (JSON decode by default).
 // Use WithHeaderKeys to pass selected headers into Handle; omit for no headers.
 func NewConsumer[E any](brokers []string, groupID string, topic string, handler EventHandler[E], options ...ConsumerOption) (Consumer, error) {
 	cfg := &consumerBuildConfig{cfg: defaultSaramaConfig()}
 	applyConsumerOptions(cfg, options)
-	adapted := adaptEventHandler[E](handler, cfg.headerKeys, withJSONDecoder[E]())
+	adapted := adaptEventHandler[E](handler, cfg.headerKeys, withJSONDecoder[E]()) //nolint:infertypeargs
 	// pass pre-built config directly; createConsumer must not re-apply options
 	group, err := sarama.NewConsumerGroup(brokers, groupID, cfg.cfg)
 	if err != nil {
