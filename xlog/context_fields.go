@@ -2,26 +2,24 @@ package xlog
 
 import (
 	"context"
+	"sync/atomic"
 )
 
-// contextFieldExtractor allows users to inject a context-based field extractor.
-var contextFieldExtractor func(context.Context) []Field
+// contextFieldExtractor is set once at startup via SetContextFieldExtractor.
+// Uses atomic pointer to avoid data races when tests call Set concurrently.
+var contextFieldExtractor atomic.Pointer[func(context.Context) []Field]
 
 // SetContextFieldExtractor sets the field extractor from context.
-// Examples: request-id, user-id, trace-id, etc.
+// Call once at startup. Examples: request-id, user-id, trace-id.
 func SetContextFieldExtractor(fn func(context.Context) []Field) {
-	contextFieldExtractor = fn
+	contextFieldExtractor.Store(&fn)
 }
 
 func populateContextFields(ctx context.Context) []Field {
-	if contextFieldExtractor != nil {
-		return contextFieldExtractor(ctx)
+	if fn := contextFieldExtractor.Load(); fn != nil {
+		return (*fn)(ctx)
 	}
-	// default: no additional fields
-	return []Field{
-		// optional example: add standardized fields here if needed
-		// Str("logger", "xlog"),
-	}
+	return nil
 }
 
 // Convenience logging helpers with context
