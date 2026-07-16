@@ -46,7 +46,12 @@ func NewConsumer[E any](brokers []string, groupID string, topic string, handler 
 	cfg := &consumerBuildConfig{cfg: defaultSaramaConfig()}
 	applyConsumerOptions(cfg, options)
 	adapted := adaptEventHandler[E](handler, cfg.headerKeys, withJSONDecoder[E]())
-	return createConsumer(brokers, groupID, []string{topic}, adapted, options...)
+	// pass pre-built config directly; createConsumer must not re-apply options
+	group, err := sarama.NewConsumerGroup(brokers, groupID, cfg.cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &consumer{group: group, topics: []string{topic}, handler: adapted}, nil
 }
 
 func (c *consumer) Start(ctx context.Context) {
