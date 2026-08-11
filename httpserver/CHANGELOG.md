@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.1 - 2026-08-11
+
+### Security
+
+- **deps:** bump `github.com/go-chi/chi/v5` to v5.3.1 (fixes CVE < 5.2.2)
+
+
 ## v0.1.0
 
 Initial release.
