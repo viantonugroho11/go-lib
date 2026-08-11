@@ -16,6 +16,7 @@ type consumerBuildConfig struct {
 	dlq         DeadLetterFunc
 	backoff     BlockBackoff
 	concurrency int
+	decoder     interface{} // func([]byte, *E) error, same E as EventHandler[E]
 }
 
 // ConsumerOption configures consumer group (sarama) and/or header keys for EventHandler.
@@ -46,6 +47,12 @@ func applyConsumerOptions(c *consumerBuildConfig, options []ConsumerOption) {
 	for _, opt := range options {
 		opt.apply(c)
 	}
+}
+
+// WithDecoder overrides the default JSON decoder for E. Use for Avro, Protobuf, msgpack, etc.
+// E must match the type used in NewConsumer[E]. Consider goccy/go-json or jsoniter for higher throughput.
+func WithDecoder[E any](fn func([]byte, *E) error) ConsumerOption {
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.decoder = fn }}
 }
 
 // WithHeaderKeys sets which header keys are passed to EventHandler.Handle. Omit to pass no headers.
@@ -80,8 +87,11 @@ func WithDeadLetter(fn DeadLetterFunc) ConsumerOption {
 
 // WithConcurrencyPerPartition sets the number of worker goroutines per partition claim (default 1).
 // Values > 1 process messages concurrently within a claim, then commit the highest CONTIGUOUS
-// completed offset. Increases throughput for I/O-bound handlers but breaks per-key ordering —
-// use only when handlers are commutative or ordering is enforced elsewhere.
+// completed offset. Break-even vs the serial path is roughly a per-message handler cost of ~5 μs on
+// Apple M2 (measured via bench): channel + goroutine overhead is ~250 ns/msg, so no-op handlers are
+// SLOWER concurrent than serial. Use only for I/O-bound handlers (DB / HTTP / RPC ~ ms range), and
+// only when handlers are commutative or per-key ordering is enforced elsewhere — parallelism within
+// a partition breaks the natural offset order.
 func WithConcurrencyPerPartition(n int) ConsumerOption {
 	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) {
 		if n < 1 {

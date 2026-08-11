@@ -21,6 +21,11 @@ func withJSONDecoder[E any]() handlerOption[E] {
 	}
 }
 
+// withDecoder is the internal wiring used by WithDecoder[E].
+func withDecoder[E any](fn func([]byte, *E) error) handlerOption[E] {
+	return func(c *handlerConfig[E]) { c.decode = fn }
+}
+
 func headersFromMessage(msg *sarama.ConsumerMessage) []Header {
 	if len(msg.Headers) == 0 {
 		return nil
@@ -34,17 +39,32 @@ func headersFromMessage(msg *sarama.ConsumerMessage) []Header {
 	return out
 }
 
+// filterHeadersByKeys returns only the headers whose Key appears in keys.
+// For len(keys) <= 4 (the common case: trace_id, correlation_id, tenant, user_id),
+// use a linear scan — zero map allocation and faster on modern CPUs than hashing.
+// Above the threshold, build a lookup map.
 func filterHeadersByKeys(headers []Header, keys []string) []Header {
 	if len(keys) == 0 || len(headers) == 0 {
 		return nil
 	}
-	allowed := make(map[string]bool, len(keys))
-	for _, k := range keys {
-		allowed[k] = true
+	out := make([]Header, 0, len(keys))
+	if len(keys) <= 4 {
+		for _, h := range headers {
+			for _, k := range keys {
+				if h.Key == k {
+					out = append(out, h)
+					break
+				}
+			}
+		}
+		return out
 	}
-	out := make([]Header, 0, len(headers))
+	allowed := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		allowed[k] = struct{}{}
+	}
 	for _, h := range headers {
-		if allowed[h.Key] {
+		if _, ok := allowed[h.Key]; ok {
 			out = append(out, h)
 		}
 	}
@@ -59,16 +79,29 @@ func adaptEventHandler[E any](handler EventHandler[E], headerKeys []string, opts
 	for _, o := range opts {
 		o(cfg)
 	}
+	wantHeaders := len(headerKeys) > 0
+	// Cache the propagator-active check at adapter construction time; otel.GetTextMapPropagator().Fields()
+	// allocates on every call (composite propagator builds a map). If the user swaps propagators after
+	// starting the consumer, they must restart it — pragmatically no one does.
+	tracingAtInit := tracingActive()
 	return func(ctx context.Context, msg *sarama.ConsumerMessage) messageResult {
-		all := headersFromMessage(msg)
-		// Extract trace context (traceparent etc.) from ALL headers before filtering.
-		ctx = extractTrace(ctx, all)
+		var headers []Header
+		if wantHeaders || tracingAtInit {
+			if len(msg.Headers) > 0 {
+				all := headersFromMessage(msg)
+				if tracingAtInit {
+					ctx = extractTrace(ctx, all)
+				}
+				if wantHeaders {
+					headers = filterHeadersByKeys(all, headerKeys)
+				}
+			}
+		}
 
 		evt := cfg.newEvent()
 		if err := cfg.decode(msg.Value, &evt); err != nil {
 			return messageResult{err: err, ctx: ctx}
 		}
-		headers := filterHeadersByKeys(all, headerKeys)
 		progress := handler.Handle(ctx, evt, headers...)
 		if progress.Status == ProgressError {
 			err := progress.Err
