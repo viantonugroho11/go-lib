@@ -1,10 +1,23 @@
 
+## kafka/v0.3.2 - 2026-08-12
+
+### Performance
+
+Benchmarked on Apple M2 (arm64). Per-message consumer hot path improved 15–26%; header-filter improved 68%.
+
+- **consumer:** cache `tracingActive()` at `adaptEventHandler` construction time. Avoids the per-message `otel.GetTextMapPropagator().Fields()` call (composite propagator builds a map, ~24 B/1 alloc). If the user swaps the global propagator after starting a consumer, they must restart it.
+- **consumer:** skip `headersFromMessage` allocation entirely when the message carries no headers, or when neither `WithHeaderKeys` was set nor tracing is active.
+- **consumer:** `filterHeadersByKeys` now uses a linear scan for `len(keys) ≤ 4` — zero map allocation. Bench: 126 ns / 240 B → 40 ns / 80 B (-68% ns, -66% B).
+- **producer / async producer:** cache tracing-active at construction time; `maybeInjectTrace` short-circuits when tracing is inactive.
+- **consumer:** `WithDecoder[E]` — override the default JSON decoder for Avro, Protobuf, msgpack, or a faster JSON lib (goccy/go-json, jsoniter) without changing the handler.
+- **docs:** `WithConcurrencyPerPartition` docstring now names the empirical break-even: handler cost > ~5 μs. Below that, the serial path is faster — pool channel + scheduling overhead dominates.
+
+
 ## kafka/v0.3.1 - 2026-08-11
 
 ### Changes
 
-- **kafka:** v0.3.0 — async producer, worker pool per partition, single-topic API
-- **kafka:** update changelog for kafka/v0.2.1
+- (auto-tagged remotely; superseded by v0.3.2)
 
 
 ## kafka/v0.3.0 - 2026-08-12

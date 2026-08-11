@@ -15,6 +15,7 @@ type Producer[T any] struct {
 	key          []byte
 	keyExtractor func(T) []byte // if set, key is computed per message; else key is used
 	encode       func(T) ([]byte, error)
+	tracing      bool // cached: is the global TextMapPropagator active at construction time
 }
 
 // NewProducer creates a producer for one topic and one message type T.
@@ -48,6 +49,7 @@ func NewProducer[T any](brokers []string, topic string, options ...ProducerOptio
 		key:          build.key,
 		keyExtractor: keyExtractor,
 		encode:       encode,
+		tracing:      tracingActive(),
 	}, nil
 }
 
@@ -72,7 +74,7 @@ func (p *Producer[T]) Publish(ctx context.Context, value T, headers ...Header) e
 		Topic:   p.topicName,
 		Key:     sarama.ByteEncoder(key),
 		Value:   sarama.ByteEncoder(encoded),
-		Headers: toRecordHeaders(injectTrace(ctx, cloneHeaders(headers))),
+		Headers: toRecordHeaders(p.maybeInjectTrace(ctx, cloneHeaders(headers))),
 	}
 	_, _, err = p.sp.SendMessage(msg)
 	return err
@@ -84,7 +86,7 @@ func (p *Producer[T]) PublishMany(ctx context.Context, values []T, headers ...He
 	if len(values) == 0 {
 		return nil
 	}
-	sharedHeaders := injectTrace(ctx, cloneHeaders(headers))
+	sharedHeaders := p.maybeInjectTrace(ctx, cloneHeaders(headers))
 	recordHeaders := toRecordHeaders(sharedHeaders)
 	messages := make([]*sarama.ProducerMessage, 0, len(values))
 	for _, v := range values {
@@ -104,6 +106,15 @@ func (p *Producer[T]) PublishMany(ctx context.Context, values []T, headers ...He
 		})
 	}
 	return p.sp.SendMessages(messages)
+}
+
+// maybeInjectTrace skips the propagator call when tracing was inactive at construction time.
+// Avoids the per-call allocation of otel.GetTextMapPropagator().Fields() on the empty composite.
+func (p *Producer[T]) maybeInjectTrace(ctx context.Context, headers []Header) []Header {
+	if !p.tracing {
+		return headers
+	}
+	return injectTrace(ctx, headers)
 }
 
 func cloneHeaders(in []Header) []Header {

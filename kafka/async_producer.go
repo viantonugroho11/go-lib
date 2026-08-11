@@ -26,6 +26,7 @@ type AsyncProducer[T any] struct {
 	encode       func(T) ([]byte, error)
 	callback     AsyncCallback[T]
 	logger       Logger
+	tracing      bool // cached at construction time; see Producer.tracing
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -88,6 +89,7 @@ func NewAsyncProducer[T any](brokers []string, topic string, options ...Producer
 		encode:       encode,
 		callback:     cb,
 		logger:       build.logger,
+		tracing:      tracingActive(),
 		closed:       make(chan struct{}),
 	}
 	p.drainWG.Add(2)
@@ -117,11 +119,18 @@ func (p *AsyncProducer[T]) Publish(ctx context.Context, value T, headers ...Head
 		Topic:    p.topicName,
 		Key:      sarama.ByteEncoder(key),
 		Value:    sarama.ByteEncoder(encoded),
-		Headers:  toRecordHeaders(injectTrace(ctx, cloneHeaders(headers))),
+		Headers:  toRecordHeaders(p.maybeInjectTrace(ctx, cloneHeaders(headers))),
 		Metadata: asyncMetadata[T]{ctx: ctx, value: value},
 	}
 	p.ap.Input() <- msg
 	return nil
+}
+
+func (p *AsyncProducer[T]) maybeInjectTrace(ctx context.Context, headers []Header) []Header {
+	if !p.tracing {
+		return headers
+	}
+	return injectTrace(ctx, headers)
 }
 
 // Close flushes in-flight messages and closes the underlying producer.

@@ -54,7 +54,13 @@ func NewConsumer[E any](brokers []string, groupID string, topic string, handler 
 		concurrency: 1,
 	}
 	applyConsumerOptions(cfg, options)
-	adapted := adaptEventHandler(handler, cfg.headerKeys, withJSONDecoder[E]())
+	opts := []handlerOption[E]{withJSONDecoder[E]()}
+	if cfg.decoder != nil {
+		if fn, ok := cfg.decoder.(func([]byte, *E) error); ok {
+			opts = append(opts, withDecoder(fn))
+		}
+	}
+	adapted := adaptEventHandler(handler, cfg.headerKeys, opts...)
 	group, err := sarama.NewConsumerGroup(brokers, groupID, cfg.cfg)
 	if err != nil {
 		return nil, err
