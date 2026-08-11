@@ -54,11 +54,11 @@ func (h RepaymentHandler) Handle(ctx context.Context, evt RepaymentEvent, header
 
 // NewOrderConsumer returns a Consumer for OrderEvent with OrderHandler.
 func NewOrderConsumer(brokers []string, groupID, topic string, opts ...kafka.ConsumerOption) (kafka.Consumer, error) {
-	return kafka.NewConsumer[OrderEvent](brokers, groupID, []string{topic}, OrderHandler{}, opts...)
+	return kafka.NewConsumer[OrderEvent](brokers, groupID, topic, OrderHandler{}, opts...)
 }
 
 // NewRepaymentConsumer returns a Consumer for RepaymentEvent with RepaymentHandler.
 func NewRepaymentConsumer(brokers []string, groupID, topic string, opts ...kafka.ConsumerOption) (kafka.Consumer, error) {
-	return kafka.NewConsumer[RepaymentEvent](brokers, groupID, []string{topic}, RepaymentHandler{}, opts...)
+	return kafka.NewConsumer[RepaymentEvent](brokers, groupID, topic, RepaymentHandler{}, opts...)
 }
 

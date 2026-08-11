@@ -46,16 +46,20 @@ type testEvent struct {
 }
 
 type recordingHandler struct {
-	name    string
-	fn      func(testEvent) Progress
-	seen    []testEvent
-	calls   int64
+	name  string
+	fn    func(testEvent) Progress
+	calls int64
+
+	mu   sync.Mutex
+	seen []testEvent
 }
 
 func (h *recordingHandler) Name() string { return h.name }
 func (h *recordingHandler) Handle(_ context.Context, evt testEvent, _ ...Header) Progress {
 	atomic.AddInt64(&h.calls, 1)
+	h.mu.Lock()
 	h.seen = append(h.seen, evt)
+	h.mu.Unlock()
 	if h.fn != nil {
 		return h.fn(evt)
 	}
