@@ -1,21 +1,24 @@
 
+## kafka/v0.3.1 - 2026-08-11
+
+### Changes
+
+- **kafka:** v0.3.0 — async producer, worker pool per partition, single-topic API
+- **kafka:** update changelog for kafka/v0.2.1
+
+
 ## kafka/v0.3.0 - 2026-08-12
 
-### Breaking
+### Changes
 
-- **consumer:** `NewConsumer` reverts to single-topic signature (`topic string`) after the v0.2.0 multi-topic experiment. One consumer, one topic — cleaner API surface. Callers on v0.2.0 need to unwrap `[]string{topic}` back to `topic`.
+- **kafka:** v0.3.0 — async producer, worker pool per partition, single-topic API
 
-### Features
 
-- **producer:** `AsyncProducer[T]` — non-blocking `Publish` wrapping sarama's `AsyncProducer`. Enqueues to sarama's input channel and returns; delivery outcome (success or error) is delivered via `WithAsyncCallback[T]` on a drain goroutine. Trace context is injected on publish, same as sync `Producer[T]`. Close waits for in-flight messages to drain.
-- **consumer:** `WithConcurrencyPerPartition(n)` — runs `n` workers per partition claim. Committer marks only the highest **contiguous** completed offset, so a hole from an in-flight message never advances the commit past it — at-least-once is preserved on rebalance. Default 1 (serial path). Trade-off: breaks per-key ordering; use only when handlers are commutative or ordering is enforced elsewhere.
-- **producer:** `WithProducerLogger(Logger)` for consistent diagnostics.
+## kafka/v0.2.1 - 2026-08-11
 
-### Tests
+### Changes
 
-- Pool contiguous-commit test with variable per-offset latency (proves out-of-order processing still commits in order).
-- Async producer callback fires on success and error (sarama `mocks.AsyncProducer`); Publish-after-Close returns an error.
-- 15 tests total, race-clean.
+- **kafka:** update changelog for kafka/v0.2.1
 
 
 ## kafka/v0.2.0 - 2026-08-11
