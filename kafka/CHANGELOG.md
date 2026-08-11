@@ -1,20 +1,22 @@
 
+## kafka/v0.1.7 - 0001-01-01
+
+### Changes
+
+
+
 ## kafka/v0.1.6 - 2026-08-11
 
-### Security
+### Changes
 
-- **deps:** bump `golang.org/x/crypto` to v0.54.0 (fixes multiple CVE < 0.35.0, < 0.45.0, < 0.52.0)
-- **deps:** bump `golang.org/x/net` to v0.57.0 (fixes CVE < 0.36.0, < 0.38.0, < 0.55.0)
-
-### Breaking
-
-- Go directive raised to 1.25.0 (required by transitive updates).
+- **deps:** bump vulnerable deps in config and kafka
 
 
 ## kafka/v0.1.5 - 2026-07-16
 
 ### Changes
 
+- **kafka:** update changelog for kafka/v0.1.5
 - update changelogs for kafka/v0.1.5, config/v0.1.2, xlog/v0.1.1
 - **kafka:** clarify ctx not propagated in Publish/PublishMany
 - **kafka:** replace deprecated BalanceStrategyRange with NewBalanceStrategyRange
