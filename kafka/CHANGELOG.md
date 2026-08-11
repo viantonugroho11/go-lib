@@ -1,4 +1,16 @@
 
+## kafka/v0.1.6 - 2026-08-11
+
+### Security
+
+- **deps:** bump `golang.org/x/crypto` to v0.54.0 (fixes multiple CVE < 0.35.0, < 0.45.0, < 0.52.0)
+- **deps:** bump `golang.org/x/net` to v0.57.0 (fixes CVE < 0.36.0, < 0.38.0, < 0.55.0)
+
+### Breaking
+
+- Go directive raised to 1.25.0 (required by transitive updates).
+
+
 ## kafka/v0.1.5 - 2026-07-16
 
 ### Changes
