@@ -4,12 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Structure
 
-Three independently versioned Go modules, each with its own `go.mod`:
+Independently versioned Go modules, each with its own `go.mod`:
 
 ```
-config/   — github.com/viantonugroho11/go-lib/config   (Go 1.23+)
-kafka/    — github.com/viantonugroho11/go-lib/kafka     (Go 1.23+)
-xlog/     — github.com/viantonugroho11/go-lib/xlog      (Go 1.23+)
+config/       — github.com/viantonugroho11/go-lib/config       (Go 1.23+)
+httpclient/   — github.com/viantonugroho11/go-lib/httpclient   (Go 1.23+)
+httpserver/   — github.com/viantonugroho11/go-lib/httpserver   (Go 1.23+)
+kafka/        — github.com/viantonugroho11/go-lib/kafka        (Go 1.23+)
+xlog/         — github.com/viantonugroho11/go-lib/xlog         (Go 1.23+)
 ```
 
 Each module is released separately. Changes to one module do not require bumping the others.
@@ -58,6 +60,14 @@ There is no top-level Makefile or workspace file. Running `go test ./...` from t
 - Package name is `config_load` (not `config`). Import as `config_load "github.com/viantonugroho11/go-lib/config"`.
 - ENV overrides use `ENVPREFIX_FIELD_SUBFIELD` pattern (dots replaced with underscores). Controlled by `envPrefix` passed to `New`.
 - Default struct tag for mapping is `"json"`. Override with `WithStructTagName("mapstructure")`.
+
+### httpserver
+
+- **`server.go`** — `New(opts...)` returns `*Server` wrapping chi router + `*http.Server`. `Run(ctx)` blocks, gracefully shuts down when ctx cancels (bounded by `WithShutdownTimeout`, default 15s). `Router()` exposes `chi.Router` for route registration; `Handler()` returns the raw `http.Handler` for `httptest`.
+- **`middleware.go`** — Built-ins: request ID (reads/generates + echoes header), correlation headers (ingress header → ctx), panic recover, request timeout, logging hook. All applied in order in `New`.
+- **`options.go`** — Functional options. `WithLogger(LoggerFunc)` wires request completion logging (fires with method, path, status, duration) — pair with `xlog`. `WithCorrelationHeader(header, ctxKey)` mirrors `httpclient.WithCorrelationHeader` for end-to-end propagation. `WithReadyCheck(fn)` plugs a readiness probe for `/readyz`.
+- **`context.go`** — `CtxKeyRequestID` default ctx key. `RequestIDFromContext(ctx)` returns the stored ID or `""`.
+- Framework: `github.com/go-chi/chi/v5`. Server does not lock consumer into chi wrappers — full chi API available via `Router()`.
 
 ### xlog
 
