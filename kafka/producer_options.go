@@ -6,12 +6,14 @@ import (
 	"github.com/IBM/sarama"
 )
 
-// producerBuildConfig holds Sarama config and optional producer-level options (key, key extractor, encoder).
+// producerBuildConfig holds Sarama config and optional producer-level options.
 type producerBuildConfig struct {
-	cfg          *sarama.Config
-	key          []byte
-	keyExtractor interface{} // func(T) []byte, same T as Producer[T]
-	encoder      interface{} // func(T) ([]byte, error), same T as Producer[T]
+	cfg           *sarama.Config
+	key           []byte
+	keyExtractor  interface{} // func(T) []byte, same T as Producer[T]
+	encoder       interface{} // func(T) ([]byte, error), same T as Producer[T]
+	asyncCallback interface{} // AsyncCallback[T], same T as AsyncProducer[T]
+	logger        Logger
 }
 
 // ProducerOption configures the producer (Sarama config and/or optional key).
@@ -56,10 +58,28 @@ func WithKeyFunc[T any](fn func(T) []byte) ProducerOption {
 }
 
 // WithEncoder overrides the default JSON encoder for T. Use for Avro, Protobuf, msgpack, etc.
-// T must match the type used in NewProducer[T].
+// T must match the type used in NewProducer[T] / NewAsyncProducer[T].
 func WithEncoder[T any](fn func(T) ([]byte, error)) ProducerOption {
 	return producerOptionFunc(func(c *producerBuildConfig) {
 		c.encoder = fn
+	})
+}
+
+// WithAsyncCallback registers a delivery callback for AsyncProducer[T]. Fires on both success
+// (err==nil) and failure. Callback runs on the drain goroutine — keep it non-blocking.
+// Ignored by the sync Producer[T].
+func WithAsyncCallback[T any](fn AsyncCallback[T]) ProducerOption {
+	return producerOptionFunc(func(c *producerBuildConfig) {
+		c.asyncCallback = fn
+	})
+}
+
+// WithProducerLogger overrides the default stderr logger for producer diagnostics.
+func WithProducerLogger(l Logger) ProducerOption {
+	return producerOptionFunc(func(c *producerBuildConfig) {
+		if l != nil {
+			c.logger = l
+		}
 	})
 }
 

@@ -9,12 +9,13 @@ import (
 )
 
 type consumerBuildConfig struct {
-	cfg        *sarama.Config
-	headerKeys []string
-	logger     Logger
-	strategy   ErrorStrategy
-	dlq        DeadLetterFunc
-	backoff    BlockBackoff
+	cfg         *sarama.Config
+	headerKeys  []string
+	logger      Logger
+	strategy    ErrorStrategy
+	dlq         DeadLetterFunc
+	backoff     BlockBackoff
+	concurrency int
 }
 
 // ConsumerOption configures consumer group (sarama) and/or header keys for EventHandler.
@@ -74,6 +75,19 @@ func WithDeadLetter(fn DeadLetterFunc) ConsumerOption {
 		if c.strategy == ErrorSkip {
 			c.strategy = ErrorDeadLetter
 		}
+	}}
+}
+
+// WithConcurrencyPerPartition sets the number of worker goroutines per partition claim (default 1).
+// Values > 1 process messages concurrently within a claim, then commit the highest CONTIGUOUS
+// completed offset. Increases throughput for I/O-bound handlers but breaks per-key ordering —
+// use only when handlers are commutative or ordering is enforced elsewhere.
+func WithConcurrencyPerPartition(n int) ConsumerOption {
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) {
+		if n < 1 {
+			n = 1
+		}
+		c.concurrency = n
 	}}
 }
 
