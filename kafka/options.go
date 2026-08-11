@@ -11,6 +11,10 @@ import (
 type consumerBuildConfig struct {
 	cfg        *sarama.Config
 	headerKeys []string
+	logger     Logger
+	strategy   ErrorStrategy
+	dlq        DeadLetterFunc
+	backoff    BlockBackoff
 }
 
 // ConsumerOption configures consumer group (sarama) and/or header keys for EventHandler.
@@ -46,6 +50,42 @@ func applyConsumerOptions(c *consumerBuildConfig, options []ConsumerOption) {
 // WithHeaderKeys sets which header keys are passed to EventHandler.Handle. Omit to pass no headers.
 func WithHeaderKeys(keys ...string) ConsumerOption {
 	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.headerKeys = keys }}
+}
+
+// WithLogger overrides the default stderr logger. Wire xlog or slog wrapper here.
+func WithLogger(l Logger) ConsumerOption {
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) {
+		if l != nil {
+			c.logger = l
+		}
+	}}
+}
+
+// WithErrorStrategy sets how the consumer reacts to ProgressError from the handler.
+// ErrorSkip (default) advances offset, ErrorBlock retries until success, ErrorDeadLetter routes to DLQ.
+func WithErrorStrategy(s ErrorStrategy) ConsumerOption {
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) { c.strategy = s }}
+}
+
+// WithDeadLetter wires a DLQ publish function; setting this also enables ErrorDeadLetter unless overridden.
+func WithDeadLetter(fn DeadLetterFunc) ConsumerOption {
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) {
+		c.dlq = fn
+		if c.strategy == ErrorSkip {
+			c.strategy = ErrorDeadLetter
+		}
+	}}
+}
+
+// WithBlockOnError is shorthand for WithErrorStrategy(ErrorBlock) with a custom backoff.
+// Pass zero BlockBackoff to keep defaults (100ms initial, 30s max, x2 factor).
+func WithBlockOnError(b BlockBackoff) ConsumerOption {
+	return &consumerOptionFunc{fn: func(c *consumerBuildConfig) {
+		c.strategy = ErrorBlock
+		if b.Initial > 0 {
+			c.backoff = b
+		}
+	}}
 }
 
 // WithConsumerClientID sets the client id.

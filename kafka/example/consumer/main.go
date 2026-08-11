@@ -32,7 +32,7 @@ func main() {
 	for i := range brokers {
 		brokers[i] = strings.TrimSpace(brokers[i])
 	}
-	c, err := kafka.NewConsumer[OrderCreated](brokers, "example-group", "orders", orderHandler{})
+	c, err := kafka.NewConsumer[OrderCreated](brokers, "example-group", []string{"orders"}, orderHandler{})
 	if err != nil {
 		log.Fatal(err)
 	}

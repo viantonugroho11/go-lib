@@ -43,7 +43,7 @@ func main() {
 		topic,
 		kafka.WithKey([]byte("orders-partition-key")),
 		kafka.WithAcks(sarama.WaitForAll),
-		kafka.WithIdempotent(),
+		kafka.WithIdempotent(true),
 		kafka.WithRetryMax(3),
 		kafka.WithRetryBackoff(100*time.Millisecond),
 		kafka.WithCompression(sarama.CompressionSnappy),

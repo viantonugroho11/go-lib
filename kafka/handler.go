@@ -59,20 +59,27 @@ func adaptEventHandler[E any](handler EventHandler[E], headerKeys []string, opts
 	for _, o := range opts {
 		o(cfg)
 	}
-	return func(ctx context.Context, msg *sarama.ConsumerMessage) error {
+	return func(ctx context.Context, msg *sarama.ConsumerMessage) messageResult {
+		all := headersFromMessage(msg)
+		// Extract trace context (traceparent etc.) from ALL headers before filtering.
+		ctx = extractTrace(ctx, all)
+
 		evt := cfg.newEvent()
 		if err := cfg.decode(msg.Value, &evt); err != nil {
-			return err
+			return messageResult{err: err, ctx: ctx}
 		}
-		all := headersFromMessage(msg)
 		headers := filterHeadersByKeys(all, headerKeys)
 		progress := handler.Handle(ctx, evt, headers...)
 		if progress.Status == ProgressError {
-			if progress.Err != nil {
-				return progress.Err
+			err := progress.Err
+			if err == nil {
+				err = errors.New(progress.Result)
 			}
-			return errors.New(progress.Result)
+			if err == nil {
+				err = errors.New("progress error without message")
+			}
+			return messageResult{err: err, ctx: ctx}
 		}
-		return nil
+		return messageResult{ctx: ctx}
 	}
 }

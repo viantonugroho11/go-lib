@@ -6,11 +6,12 @@ import (
 	"github.com/IBM/sarama"
 )
 
-// producerBuildConfig holds Sarama config and optional producer-level options (key or key extractor).
+// producerBuildConfig holds Sarama config and optional producer-level options (key, key extractor, encoder).
 type producerBuildConfig struct {
 	cfg          *sarama.Config
 	key          []byte
 	keyExtractor interface{} // func(T) []byte, same T as Producer[T]
+	encoder      interface{} // func(T) ([]byte, error), same T as Producer[T]
 }
 
 // ProducerOption configures the producer (Sarama config and/or optional key).
@@ -22,13 +23,16 @@ type producerOptionFunc func(*producerBuildConfig)
 
 func (f producerOptionFunc) apply(c *producerBuildConfig) { f(c) }
 
-// defaultProducerConfig returns a Sarama producer config with best-practice defaults.
+// defaultProducerConfig returns a Sarama producer config with idempotent, exactly-once-friendly defaults.
+// Overridable via With* options; WithIdempotent(false) can turn it off if a broker forbids it.
 func defaultProducerConfig() *sarama.Config {
 	cfg := sarama.NewConfig()
 	cfg.Version = sarama.V2_8_0_0
 	cfg.Producer.Return.Successes = true
 	cfg.Producer.RequiredAcks = sarama.WaitForAll
-	cfg.Producer.Retry.Max = 3
+	cfg.Producer.Idempotent = true
+	cfg.Net.MaxOpenRequests = 1
+	cfg.Producer.Retry.Max = 5
 	cfg.Producer.Retry.Backoff = 100 * time.Millisecond
 	cfg.Producer.Compression = sarama.CompressionSnappy
 	cfg.Producer.Timeout = 10 * time.Second
@@ -48,6 +52,14 @@ func WithKey(key []byte) ProducerOption {
 func WithKeyFunc[T any](fn func(T) []byte) ProducerOption {
 	return producerOptionFunc(func(c *producerBuildConfig) {
 		c.keyExtractor = fn
+	})
+}
+
+// WithEncoder overrides the default JSON encoder for T. Use for Avro, Protobuf, msgpack, etc.
+// T must match the type used in NewProducer[T].
+func WithEncoder[T any](fn func(T) ([]byte, error)) ProducerOption {
+	return producerOptionFunc(func(c *producerBuildConfig) {
+		c.encoder = fn
 	})
 }
 
@@ -72,12 +84,18 @@ func WithAcks(acks sarama.RequiredAcks) ProducerOption {
 	})
 }
 
-// WithIdempotent enables idempotent producer (exactly-once semantics; sets acks=all and MaxOpenRequests=1).
-func WithIdempotent() ProducerOption {
+// WithIdempotent toggles the idempotent producer. Enabled by default; call WithIdempotent(false)
+// to opt out (e.g. when the broker/policy forbids it). When enabled, acks=all and MaxOpenRequests=1
+// are forced; when disabled, MaxOpenRequests is restored to 5 (sarama default).
+func WithIdempotent(enable bool) ProducerOption {
 	return producerOptionFunc(func(c *producerBuildConfig) {
-		c.cfg.Producer.Idempotent = true
-		c.cfg.Producer.RequiredAcks = sarama.WaitForAll
-		c.cfg.Net.MaxOpenRequests = 1
+		c.cfg.Producer.Idempotent = enable
+		if enable {
+			c.cfg.Producer.RequiredAcks = sarama.WaitForAll
+			c.cfg.Net.MaxOpenRequests = 1
+		} else {
+			c.cfg.Net.MaxOpenRequests = 5
+		}
 	})
 }
 

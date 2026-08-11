@@ -47,12 +47,19 @@ There is no top-level Makefile or workspace file. Running `go test ./...` from t
 ### kafka
 
 - **`model.go`** — Public types: `Header`, `Progress`, `ProgressStatus`, `EventHandler[E]`, `EventProducer[E]`, `EventAndHeader[E]`. Central contract for consumers and producers.
-- **`consumer.go`** — `NewConsumer[E]` returns `Consumer` interface (`Start`/`Close`). Internally: sarama `ConsumerGroup` + two goroutines (consume loop + error drain). `group.Close()` must precede `wg.Wait()` to avoid deadlock.
-- **`handler.go`** — `adaptEventHandler[E]` bridges `EventHandler[E]` to the internal `messageHandler` func. Handles JSON decode, header filtering, and `Progress` → error mapping.
-- **`producer.go`** — `Producer[T]` wraps sarama `SyncProducer`. Implements `EventProducer[T]`. Key set via `WithKey` (fixed) or `WithKeyFunc[T]` (per-message). `ctx` is accepted but not propagated (sarama limitation).
-- **`options.go`** / **`producer_options.go`** — Functional options for each type. Use `With*Consumer*` prefix for consumer-specific options. `WithKey`/`WithKeyFunc` are producer-only.
+- **`consumer.go`** — `NewConsumer[E](brokers, groupID, topics []string, handler, opts...)` returns `Consumer` (`Start`/`Close`). Multi-topic supported. Internally: sarama `ConsumerGroup` + two goroutines (consume loop + error drain). `group.Close()` must precede `wg.Wait()` to avoid deadlock. `processOne` applies `ErrorStrategy` per failing message.
+- **`error_strategy.go`** — `ErrorStrategy` = `ErrorSkip` (default, log + advance), `ErrorBlock` (retry with `BlockBackoff` until success or ctx cancel), `ErrorDeadLetter` (route to `DeadLetterFunc`, then advance; falls back to skip on DLQ publish failure).
+- **`handler.go`** — `adaptEventHandler[E]` bridges `EventHandler[E]` to the internal `messageHandler` func. Extracts OTel trace context from all headers before filtering, then decodes JSON, filters headers by `WithHeaderKeys`, and maps `Progress` → `messageResult`.
+- **`trace.go`** — `injectTrace`/`extractTrace` use the global `otel.TextMapPropagator` to round-trip `traceparent`/`tracestate` across producer → consumer. No-op when no propagator is configured.
+- **`logger.go`** — `Logger` interface (`Errorf`/`Infof`); default `stderrLogger`. Wire `xlog` (or any adapter) via `WithLogger`.
+- **`producer.go`** — `Producer[T]` wraps sarama `SyncProducer`. Implements `EventProducer[T]`. Key set via `WithKey` (fixed) or `WithKeyFunc[T]` (per-message). Encoder overridable via `WithEncoder[T]`. Idempotent by default (`acks=all`, `MaxOpenRequests=1`). `ctx` is accepted for trace injection but is not propagated into sarama's `SendMessage` wait (bounded by `Producer.Timeout`).
+- **`options.go`** / **`producer_options.go`** — Functional options for each type. Consumer-only: `WithHeaderKeys`, `WithLogger`, `WithErrorStrategy`, `WithDeadLetter`, `WithBlockOnError`, `With*Consumer*`, TLS, SASL, offsets. Producer-only: `WithKey`, `WithKeyFunc[T]`, `WithEncoder[T]`, `WithIdempotent(bool)`, `WithAcks`, `WithRetry*`, `WithCompression`, `WithTimeout`.
 
-**Key invariant:** `ProgressError` prevents offset commit (message retried). `ProgressSuccess`/`ProgressSkip`/`ProgressDrop` all commit. `SetError()` on `Progress` sets both `Err` and `Status=ProgressError`.
+**Key invariants:**
+- `ProgressError` handling is determined by `ErrorStrategy` (formerly silent-drop; see kafka/v0.2.0 CHANGELOG for the offset-commit bug fixed here).
+- `ProgressSuccess`/`ProgressSkip`/`ProgressDrop` all commit.
+- `SetError()` on `Progress` sets both `Err` and `Status=ProgressError`.
+- OTel trace context is injected on publish and extracted on consume automatically; no handler changes required.
 
 ### config
 

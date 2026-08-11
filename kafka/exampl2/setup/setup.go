@@ -11,7 +11,7 @@ import (
 
 // SetupConsumer builds a Consumer from EventHandler[E].
 func SetupConsumer[E any](ctx context.Context, brokers []string, groupID, topic string, handler kafka.EventHandler[E], opts ...kafka.ConsumerOption) (kafka.Consumer, error) {
-	return kafka.NewConsumer[E](brokers, groupID, topic, handler, opts...)
+	return kafka.NewConsumer[E](brokers, groupID, []string{topic}, handler, opts...)
 }
 
 // ConsumerOption re-exports kafka.ConsumerOption for options (TLS, offset, etc.).

@@ -19,7 +19,7 @@ type Producer[T any] struct {
 
 // NewProducer creates a producer for one topic and one message type T.
 // The topic is fixed; use WithKey or WithKeyFunc to set the message key.
-// Uses defaultProducerConfig(); options override defaults.
+// Uses defaultProducerConfig() (idempotent + acks=all); options override defaults.
 func NewProducer[T any](brokers []string, topic string, options ...ProducerOption) (*Producer[T], error) {
 	build := &producerBuildConfig{cfg: defaultProducerConfig()}
 	for _, opt := range options {
@@ -33,12 +33,21 @@ func NewProducer[T any](brokers []string, topic string, options ...ProducerOptio
 	if build.keyExtractor != nil {
 		keyExtractor, _ = build.keyExtractor.(func(T) []byte)
 	}
+	var encode func(T) ([]byte, error)
+	if build.encoder != nil {
+		if fn, ok := build.encoder.(func(T) ([]byte, error)); ok {
+			encode = fn
+		}
+	}
+	if encode == nil {
+		encode = func(v T) ([]byte, error) { return json.Marshal(v) }
+	}
 	return &Producer[T]{
 		sp:           sp,
 		topicName:    topic,
 		key:          build.key,
 		keyExtractor: keyExtractor,
-		encode:       func(v T) ([]byte, error) { return json.Marshal(v) },
+		encode:       encode,
 	}, nil
 }
 
@@ -47,25 +56,9 @@ func (p *Producer[T]) Close() error {
 	return p.sp.Close()
 }
 
-// sendRaw sends a single raw message (key, value bytes) to the producer's topic.
-func (p *Producer[T]) sendRaw(key []byte, value []byte, headers ...Header) (partition int32, offset int64, err error) {
-	var saramaHeaders []sarama.RecordHeader
-	if len(headers) > 0 {
-		saramaHeaders = make([]sarama.RecordHeader, 0, len(headers))
-		for _, h := range headers {
-			saramaHeaders = append(saramaHeaders, sarama.RecordHeader{Key: []byte(h.Key), Value: h.Value})
-		}
-	}
-	return p.sp.SendMessage(&sarama.ProducerMessage{
-		Topic:   p.topicName,
-		Key:     sarama.ByteEncoder(key),
-		Value:   sarama.ByteEncoder(value),
-		Headers: saramaHeaders,
-	})
-}
-
-// Publish encodes the value as JSON and sends one message. Key from WithKey or WithKeyFunc (per message).
-// ctx is accepted for interface compatibility; sarama SyncProducer does not propagate cancellation.
+// Publish encodes the value and sends one message. Key from WithKey or WithKeyFunc (per message).
+// Injects the ctx trace context (OTel global propagator) into the message headers.
+// ctx cancellation is not propagated into sarama's SyncProducer wait — Timeout config bounds it.
 func (p *Producer[T]) Publish(ctx context.Context, value T, headers ...Header) error {
 	encoded, err := p.encode(value)
 	if err != nil {
@@ -75,24 +68,25 @@ func (p *Producer[T]) Publish(ctx context.Context, value T, headers ...Header) e
 	if p.keyExtractor != nil {
 		key = p.keyExtractor(value)
 	}
-	_, _, err = p.sendRaw(key, encoded, headers...)
+	msg := &sarama.ProducerMessage{
+		Topic:   p.topicName,
+		Key:     sarama.ByteEncoder(key),
+		Value:   sarama.ByteEncoder(encoded),
+		Headers: toRecordHeaders(injectTrace(ctx, cloneHeaders(headers))),
+	}
+	_, _, err = p.sp.SendMessage(msg)
 	return err
 }
 
-// PublishMany encodes each value as JSON and sends messages in batch. Key from WithKey or WithKeyFunc (per message).
-// ctx is accepted for interface compatibility; sarama SyncProducer does not propagate cancellation.
+// PublishMany encodes each value and sends messages in batch. Trace context is injected once
+// (shared across the batch); each message gets a copy of the merged header set.
 func (p *Producer[T]) PublishMany(ctx context.Context, values []T, headers ...Header) error {
 	if len(values) == 0 {
 		return nil
 	}
+	sharedHeaders := injectTrace(ctx, cloneHeaders(headers))
+	recordHeaders := toRecordHeaders(sharedHeaders)
 	messages := make([]*sarama.ProducerMessage, 0, len(values))
-	var saramaHeaders []sarama.RecordHeader
-	if len(headers) > 0 {
-		saramaHeaders = make([]sarama.RecordHeader, 0, len(headers))
-		for _, h := range headers {
-			saramaHeaders = append(saramaHeaders, sarama.RecordHeader{Key: []byte(h.Key), Value: h.Value})
-		}
-	}
 	for _, v := range values {
 		encoded, err := p.encode(v)
 		if err != nil {
@@ -106,8 +100,28 @@ func (p *Producer[T]) PublishMany(ctx context.Context, values []T, headers ...He
 			Topic:   p.topicName,
 			Key:     sarama.ByteEncoder(key),
 			Value:   sarama.ByteEncoder(encoded),
-			Headers: saramaHeaders,
+			Headers: recordHeaders,
 		})
 	}
 	return p.sp.SendMessages(messages)
+}
+
+func cloneHeaders(in []Header) []Header {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Header, len(in))
+	copy(out, in)
+	return out
+}
+
+func toRecordHeaders(in []Header) []sarama.RecordHeader {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]sarama.RecordHeader, 0, len(in))
+	for _, h := range in {
+		out = append(out, sarama.RecordHeader{Key: []byte(h.Key), Value: h.Value})
+	}
+	return out
 }
