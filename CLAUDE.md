@@ -12,6 +12,7 @@ errors/       — github.com/viantonugroho11/go-lib/errors       (Go 1.23+)
 httpclient/   — github.com/viantonugroho11/go-lib/httpclient   (Go 1.23+)
 httpserver/   — github.com/viantonugroho11/go-lib/httpserver   (Go 1.23+)
 kafka/        — github.com/viantonugroho11/go-lib/kafka        (Go 1.23+)
+otel/         — github.com/viantonugroho11/go-lib/otel         (Go 1.23+)
 xlog/         — github.com/viantonugroho11/go-lib/xlog         (Go 1.23+)
 ```
 
@@ -86,6 +87,13 @@ There is no top-level Makefile or workspace file. Running `go test ./...` from t
 - **`options.go`** — Functional options. `WithLogger(LoggerFunc)` wires request completion logging (fires with method, path, status, duration) — pair with `xlog`. `WithCorrelationHeader(header, ctxKey)` mirrors `httpclient.WithCorrelationHeader` for end-to-end propagation. `WithReadyCheck(fn)` plugs a readiness probe for `/readyz`.
 - **`context.go`** — `CtxKeyRequestID` default ctx key. `RequestIDFromContext(ctx)` returns the stored ID or `""`.
 - Framework: `github.com/go-chi/chi/v5`. Server does not lock consumer into chi wrappers — full chi API available via `Router()`.
+
+### otel
+
+- **`otel.go`** — `Init(ctx, opts...)` returns `ShutdownFunc`. Builds resource, tracer provider (OTLP exporter + batch processor), meter provider (OTLP + periodic reader), and sets the global TextMapPropagator (`TraceContext + Baggage` composite by default). Same lifecycle pattern as `xlog.Init`. `Tracer(name)` / `Meter(name)` shortcuts for the global instances.
+- **`options.go`** — Functional options: `WithServiceName`, `WithServiceVersion`, `WithEnvironment`, `WithResourceAttrs`, `WithEndpoint`, `WithProtocol` (`ProtocolGRPC` default, `ProtocolHTTP`), `WithInsecure`, `WithHeaders`, `WithTraceSampler`, `WithBatchTimeout`, `WithMaxExportBatchSize`, `WithMaxQueueSize`, `WithoutTraces`, `WithoutMetrics`, `WithPropagators`.
+- **`env.go`** — `InitFromEnv(ctx, extra...)` reads `GO_LIB_OTEL_*` (endpoint, protocol, insecure, service name/version, environment, trace sample ratio, disable flags) plus standard `OTEL_*` env vars via `resource.WithFromEnv`.
+- **Wire path** — Once `Init` runs, the `kafka` producer/consumer, `httpclient`, and `httpserver` all use the global propagator automatically; no per-call wiring needed.
 
 ### xlog
 
