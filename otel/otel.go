@@ -9,6 +9,7 @@
 //	    otel.WithServiceVersion("1.4.2"),
 //	    otel.WithEnvironment("prod"),
 //	    otel.WithEndpoint("otel-collector.observability:4317"),
+//	    otel.WithErrorHandler(func(err error) { log.Printf("otel: %v", err) }),
 //	)
 //	if err != nil { log.Fatal(err) }
 //	defer shutdown(context.Background())
@@ -22,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -39,15 +41,33 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// ShutdownFunc flushes and stops all providers. Safe to call once; subsequent calls no-op.
+// ShutdownFunc flushes and stops all providers. Safe to call multiple times.
 type ShutdownFunc func(ctx context.Context) error
+
+var (
+	initMu      sync.Mutex
+	initialized bool
+)
 
 // Init wires up global providers and the propagator. Returns a shutdown func that flushes
 // pending telemetry within ctx's deadline; always call it before exit.
+//
+// Calling Init more than once returns an error — providers are boot-once state.
+// Use Reset() in tests to re-init.
 func Init(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
+	initMu.Lock()
+	defer initMu.Unlock()
+	if initialized {
+		return nil, errors.New("otel: Init already called; use Reset in tests to re-init")
+	}
+
 	cfg := defaultConfig()
 	for _, o := range opts {
 		o(cfg)
+	}
+
+	if cfg.errorHandler != nil {
+		otel.SetErrorHandler(cfg.errorHandler)
 	}
 
 	res, err := buildResource(ctx, cfg)
@@ -77,6 +97,7 @@ func Init(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(cfg.propagators...))
 
+	initialized = true
 	shutdown := func(sctx context.Context) error {
 		var errs []error
 		for _, fn := range shutdownFns {
@@ -84,9 +105,19 @@ func Init(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 				errs = append(errs, err)
 			}
 		}
+		initMu.Lock()
+		initialized = false
+		initMu.Unlock()
 		return errors.Join(errs...)
 	}
 	return shutdown, nil
+}
+
+// Reset clears the initialized flag so tests can call Init again. Not for production use.
+func Reset() {
+	initMu.Lock()
+	initialized = false
+	initMu.Unlock()
 }
 
 // Tracer returns a named tracer from the global provider.
@@ -94,6 +125,37 @@ func Tracer(name string) trace.Tracer { return otel.Tracer(name) }
 
 // Meter returns a named meter from the global provider.
 func Meter(name string) metric.Meter { return otel.Meter(name) }
+
+// SpanContextInfo pulls trace ID, span ID, and sampled flag from ctx for log correlation.
+// ok is false when ctx carries no valid span.
+//
+// Use it to populate fields on any structured logger (xlog, slog, zap) without importing
+// otel from that logger's package:
+//
+//	if info, ok := otel.SpanContextInfo(ctx); ok {
+//	    logger.Info("event",
+//	        "trace_id", info.TraceID,
+//	        "span_id", info.SpanID,
+//	    )
+//	}
+func SpanContextInfo(ctx context.Context) (SpanInfo, bool) {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
+		return SpanInfo{}, false
+	}
+	return SpanInfo{
+		TraceID: sc.TraceID().String(),
+		SpanID:  sc.SpanID().String(),
+		Sampled: sc.IsSampled(),
+	}, true
+}
+
+// SpanInfo is the compact view of a SpanContext for log correlation.
+type SpanInfo struct {
+	TraceID string
+	SpanID  string
+	Sampled bool
+}
 
 // --- internals ---
 
@@ -110,7 +172,7 @@ func buildResource(ctx context.Context, cfg *config) (*resource.Resource, error)
 	attrs = append(attrs, cfg.resourceAttrs...)
 
 	return resource.New(ctx,
-		resource.WithFromEnv(),      // OTEL_RESOURCE_ATTRIBUTES, OTEL_SERVICE_NAME
+		resource.WithFromEnv(),
 		resource.WithProcess(),
 		resource.WithHost(),
 		resource.WithTelemetrySDK(),
@@ -163,7 +225,7 @@ func newMeterProvider(ctx context.Context, cfg *config, res *resource.Resource) 
 	if err != nil {
 		return nil, err
 	}
-	reader := sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(cfg.batchTimeout))
+	reader := sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(cfg.metricInterval))
 	return sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
 		sdkmetric.WithReader(reader),

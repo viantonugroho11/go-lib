@@ -2,7 +2,9 @@ package otel
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,25 +13,112 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // TestInit_ExporterUnreachable proves Init returns an error when the OTLP endpoint
 // cannot be resolved within ctx's deadline. Serves as a sanity smoke for the wiring
 // without requiring a live collector.
 func TestInit_ExporterUnreachable(t *testing.T) {
+	Reset()
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	_, err := Init(ctx,
+	sd, err := Init(ctx,
 		WithServiceName("test"),
-		WithEndpoint("localhost:1"), // guaranteed refused / no listener
+		WithEndpoint("localhost:1"),
 		WithProtocol(ProtocolGRPC),
 	)
-	// gRPC exporter is lazy — the actual dial happens on first export. So Init likely
-	// succeeds here; if it does, that's still valid — we just make sure it doesn't panic.
-	// Test kept as a smoke — real integration coverage needs a collector.
 	if err != nil && !strings.Contains(err.Error(), "otel") {
 		t.Fatalf("unexpected error kind: %v", err)
+	}
+	if sd != nil {
+		_ = sd(context.Background())
+	}
+}
+
+// TestInit_Idempotence proves a second Init call returns an error.
+func TestInit_Idempotence(t *testing.T) {
+	Reset()
+	sd, err := Init(context.Background(),
+		WithServiceName("test"),
+		WithoutTraces(),
+		WithoutMetrics(),
+	)
+	if err != nil {
+		t.Fatalf("first init: %v", err)
+	}
+	_, err2 := Init(context.Background(), WithServiceName("test2"))
+	if err2 == nil {
+		t.Fatal("second Init should return error")
+	}
+	_ = sd(context.Background()) // clears initialized flag
+	// After shutdown, Init should succeed again.
+	sd2, err3 := Init(context.Background(), WithServiceName("test3"), WithoutTraces(), WithoutMetrics())
+	if err3 != nil {
+		t.Fatalf("post-shutdown init: %v", err3)
+	}
+	_ = sd2(context.Background())
+}
+
+// TestErrorHandlerReceivesSDKError proves WithErrorHandler is wired to otel.SetErrorHandler.
+func TestErrorHandlerReceivesSDKError(t *testing.T) {
+	Reset()
+	var got atomic.Value
+	sd, err := Init(context.Background(),
+		WithServiceName("test"),
+		WithoutTraces(),
+		WithoutMetrics(),
+		WithErrorHandler(func(e error) {
+			if e != nil {
+				got.Store(e.Error())
+			}
+		}),
+	)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer sd(context.Background())
+
+	sdkotel.Handle(errors.New("simulated sdk error"))
+	if v := got.Load(); v == nil || v.(string) != "simulated sdk error" {
+		t.Fatalf("error handler not called; got %v", v)
+	}
+}
+
+// TestSpanContextInfo returns fields for a valid ctx and ok=false for empty ctx.
+func TestSpanContextInfo(t *testing.T) {
+	Reset()
+	if info, ok := SpanContextInfo(context.Background()); ok {
+		t.Fatalf("bare ctx should return ok=false, got %+v", info)
+	}
+	tid, _ := trace.TraceIDFromHex("0af7651916cd43dd8448eb211c80319c")
+	sid, _ := trace.SpanIDFromHex("b7ad6b7169203331")
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: tid, SpanID: sid, TraceFlags: trace.FlagsSampled,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+	info, ok := SpanContextInfo(ctx)
+	if !ok {
+		t.Fatal("ok should be true for valid span context")
+	}
+	if info.TraceID != tid.String() || info.SpanID != sid.String() || !info.Sampled {
+		t.Fatalf("info = %+v", info)
+	}
+}
+
+// TestMetricInterval_IsSeparate proves WithMetricInterval decouples from BatchTimeout.
+// Previously the meter reader ran at BatchTimeout — a bug for services that want
+// short trace flushes but longer metric intervals.
+func TestMetricInterval_IsSeparate(t *testing.T) {
+	cfg := defaultConfig()
+	WithBatchTimeout(2 * time.Second)(cfg)
+	WithMetricInterval(45 * time.Second)(cfg)
+	if cfg.batchTimeout != 2*time.Second {
+		t.Fatalf("batch = %v", cfg.batchTimeout)
+	}
+	if cfg.metricInterval != 45*time.Second {
+		t.Fatalf("metric interval = %v", cfg.metricInterval)
 	}
 }
 
@@ -41,6 +130,7 @@ func TestPropagatorInstalled(t *testing.T) {
 
 	// Use WithoutTraces + WithoutMetrics to skip exporter dials entirely, so we only
 	// exercise the propagator wiring path.
+	Reset()
 	shutdown, err := Init(context.Background(),
 		WithServiceName("test"),
 		WithoutTraces(),
@@ -71,6 +161,7 @@ func TestPropagatorInstalled(t *testing.T) {
 
 // TestCustomPropagator verifies WithPropagators replaces the default set.
 func TestCustomPropagator(t *testing.T) {
+	Reset()
 	shutdown, err := Init(context.Background(),
 		WithServiceName("test"),
 		WithoutTraces(),
@@ -152,6 +243,7 @@ func TestInitFromEnvReadsOverrides(t *testing.T) {
 	t.Setenv("GO_LIB_OTEL_SERVICE_VERSION", "9.9.9")
 	t.Setenv("GO_LIB_OTEL_ENVIRONMENT", "staging")
 
+	Reset()
 	shutdown, err := InitFromEnv(context.Background(), WithoutTraces(), WithoutMetrics())
 	if err != nil {
 		t.Fatalf("init: %v", err)

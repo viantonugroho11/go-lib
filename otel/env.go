@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -59,6 +60,11 @@ func envOptions() []Option {
 	if v := os.Getenv("GO_LIB_OTEL_TRACE_SAMPLE_RATIO"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			opts = append(opts, WithTraceSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(f))))
+		}
+	}
+	if v := os.Getenv("GO_LIB_OTEL_METRIC_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			opts = append(opts, WithMetricInterval(d))
 		}
 	}
 	if isTrue(os.Getenv("GO_LIB_OTEL_DISABLE_TRACES")) {
