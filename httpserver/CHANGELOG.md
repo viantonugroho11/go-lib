@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.2 - 2026-08-12
+
+### Docs
+
+- Add `README.md` with quickstart, middleware order, options, health/ready notes, tracing wire, and bench excerpt.
+- Add `example/` with a chi handler, correlation header, health check, and panic recover demo.
+- Add `bench_test.go` — 4 benches: `/healthz` end-to-end, user handler, request-ID middleware in both passthru and generate modes.
+
+
 ## v0.1.1 - 2026-08-11
 
 ### Security

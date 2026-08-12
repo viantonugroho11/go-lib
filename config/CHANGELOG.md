@@ -1,4 +1,12 @@
 
+## config/v0.1.4 - 2026-08-12
+
+### Docs
+
+- Add `example/` with `config.yaml` + `main.go` showing file load and ENV overrides (`EX_APP_PORT`, `EX_DB_HOST`).
+- Add `bench_test.go` — 2 benches: load from file, load with ENV overrides.
+
+
 ## config/v0.1.3 - 2026-08-11
 
 ### Security

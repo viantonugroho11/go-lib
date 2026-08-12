@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.1 - 2026-08-12
+
+### Docs
+
+- Add `README.md` with quickstart, ENV table, options overview, end-to-end wire notes, sampling guidance, and bench excerpt.
+- Add `example/` with a runnable service that emits one span + one counter.
+- Add `bench_test.go` — 3 benches: `Tracer.Start/End` no-op (`NeverSample`), sampled (`AlwaysSample` + in-memory recorder), and resource build.
+
+
 ## v0.1.0 - 2026-08-12
 
 Initial release.

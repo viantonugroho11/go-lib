@@ -1,0 +1,11 @@
+app:
+  name: example
+  port: 8080
+db:
+  host: localhost
+  port: 5432
+  user: app
+kafka:
+  brokers:
+    - kafka-1:9092
+    - kafka-2:9092

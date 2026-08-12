@@ -1,0 +1,3 @@
+user.not_found: "User {{.id}} tidak ditemukan"
+user.email_taken: "Email {{.email}} sudah terdaftar"
+payment.insufficient: "Saldo {{.have}} kurang dari yang dibutuhkan {{.need}}"

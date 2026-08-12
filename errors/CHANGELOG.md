@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.1 - 2026-08-12
+
+### Docs
+
+- Add `README.md` with quickstart, dictionary format, kind → HTTP mapping, options, and end-to-end wire example.
+- Add `example/` with runnable multi-locale demo (`en.yaml` + `id.yaml`, business error → resolve loop).
+- Add `bench_test.go` — 5 benches covering hot-hit, locale fallback, missing code, `StatusCode`, and the global-resolver path.
+
+
 ## v0.1.0 - 2026-08-12
 
 Initial release.
