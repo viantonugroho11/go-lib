@@ -73,6 +73,15 @@ func envOptions() []Option {
 	if isTrue(os.Getenv("GO_LIB_OTEL_DISABLE_METRICS")) {
 		opts = append(opts, WithoutMetrics())
 	}
+	if isTrue(os.Getenv("GO_LIB_OTEL_DISABLE_LOGS")) {
+		opts = append(opts, WithoutLogs())
+	}
+	if isTrue(os.Getenv("GO_LIB_OTEL_RUNTIME_METRICS")) {
+		opts = append(opts, WithRuntimeMetrics())
+	}
+	if isTrue(os.Getenv("GO_LIB_OTEL_STDOUT_EXPORTER")) {
+		opts = append(opts, WithStdoutExporter())
+	}
 	return opts
 }
 

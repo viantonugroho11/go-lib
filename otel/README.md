@@ -43,11 +43,14 @@ Recognized env vars (`GO_LIB_OTEL_*` overrides standard `OTEL_*`):
 ### Options
 
 - **Identity**: `WithServiceName`, `WithServiceVersion`, `WithEnvironment`, `WithResourceAttrs`.
-- **Transport**: `WithProtocol(ProtocolGRPC|ProtocolHTTP)`, `WithEndpoint`, `WithHeaders`, `WithInsecure`.
+- **Transport**: `WithProtocol(ProtocolGRPC|ProtocolHTTP)`, `WithEndpoint`, `WithHeaders`, `WithInsecure`, `WithTLSConfig(*tls.Config)`.
 - **Sampling**: `WithTraceSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.05)))`.
-- **Batching**: `WithBatchTimeout`, `WithMaxExportBatchSize`, `WithMaxQueueSize`.
-- **Opt-out**: `WithoutTraces`, `WithoutMetrics`.
-- **Propagators**: `WithPropagators` (default `TraceContext + Baggage`).
+- **Batching**: `WithBatchTimeout`, `WithMetricInterval`, `WithMaxExportBatchSize`, `WithMaxQueueSize`.
+- **Opt-out**: `WithoutTraces`, `WithoutMetrics`, `WithoutLogs`.
+- **Propagators**: `WithPropagators` (default `TraceContext + Baggage`); helpers `PropagatorB3()`, `PropagatorJaeger()`.
+- **Metrics variants**: `WithRuntimeMetrics()` (Go runtime auto-instrumentation), `WithPrometheusExporter(mux, path)` (scrape endpoint alongside OTLP).
+- **Dev / debug**: `WithStdoutExporter()` (traces + metrics + logs → stdout), `WithSpanProcessor(sp)` (append custom span processor), `WithErrorHandler(fn)` (SDK-internal error callback).
+- **Log correlation helper**: `SpanContextInfo(ctx) (SpanInfo, bool)` — returns `TraceID`, `SpanID`, `Sampled`. Wire into your logger without importing otel from the logger package.
 
 ### End-to-End Wire
 

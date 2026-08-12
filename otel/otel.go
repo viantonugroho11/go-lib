@@ -1,6 +1,6 @@
-// Package otel bootstraps OpenTelemetry for a service: resource, tracer provider,
-// meter provider, and global text-map propagator. Init returns a shutdown func that
-// flushes pending spans/metrics on exit; always call it.
+// Package otel bootstraps OpenTelemetry for a service: resource, tracer, meter,
+// logger providers, and the global text-map propagator. Init returns a shutdown
+// func that flushes all pipelines on exit; always call it.
 //
 // Usage:
 //
@@ -9,14 +9,11 @@
 //	    otel.WithServiceVersion("1.4.2"),
 //	    otel.WithEnvironment("prod"),
 //	    otel.WithEndpoint("otel-collector.observability:4317"),
+//	    otel.WithRuntimeMetrics(),
 //	    otel.WithErrorHandler(func(err error) { log.Printf("otel: %v", err) }),
 //	)
 //	if err != nil { log.Fatal(err) }
 //	defer shutdown(context.Background())
-//
-//	tracer := otel.Tracer("payments/service")
-//	ctx, span := tracer.Start(ctx, "ChargeCard")
-//	defer span.End()
 package otel
 
 import (
@@ -32,6 +29,8 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -52,8 +51,7 @@ var (
 // Init wires up global providers and the propagator. Returns a shutdown func that flushes
 // pending telemetry within ctx's deadline; always call it before exit.
 //
-// Calling Init more than once returns an error — providers are boot-once state.
-// Use Reset() in tests to re-init.
+// Calling Init more than once returns an error. Use Reset() in tests to re-init.
 func Init(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 	initMu.Lock()
 	defer initMu.Unlock()
@@ -93,6 +91,23 @@ func Init(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 		}
 		otel.SetMeterProvider(mp)
 		shutdownFns = append(shutdownFns, mp.Shutdown)
+
+		if cfg.runtimeMetrics {
+			stopRuntime, err := startRuntimeMetrics()
+			if err != nil {
+				return nil, fmt.Errorf("otel: runtime metrics: %w", err)
+			}
+			shutdownFns = append(shutdownFns, stopRuntime)
+		}
+	}
+
+	if !cfg.disableLogs {
+		lp, err := newLoggerProvider(ctx, cfg, res)
+		if err != nil {
+			return nil, fmt.Errorf("otel: logger provider: %w", err)
+		}
+		setGlobalLoggerProvider(lp)
+		shutdownFns = append(shutdownFns, lp.Shutdown)
 	}
 
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(cfg.propagators...))
@@ -108,6 +123,7 @@ func Init(ctx context.Context, opts ...Option) (ShutdownFunc, error) {
 		initMu.Lock()
 		initialized = false
 		initMu.Unlock()
+		setGlobalLoggerProvider(nil) // noop
 		return errors.Join(errs...)
 	}
 	return shutdown, nil
@@ -118,6 +134,7 @@ func Reset() {
 	initMu.Lock()
 	initialized = false
 	initMu.Unlock()
+	setGlobalLoggerProvider(nil)
 }
 
 // Tracer returns a named tracer from the global provider.
@@ -128,16 +145,6 @@ func Meter(name string) metric.Meter { return otel.Meter(name) }
 
 // SpanContextInfo pulls trace ID, span ID, and sampled flag from ctx for log correlation.
 // ok is false when ctx carries no valid span.
-//
-// Use it to populate fields on any structured logger (xlog, slog, zap) without importing
-// otel from that logger's package:
-//
-//	if info, ok := otel.SpanContextInfo(ctx); ok {
-//	    logger.Info("event",
-//	        "trace_id", info.TraceID,
-//	        "span_id", info.SpanID,
-//	    )
-//	}
 func SpanContextInfo(ctx context.Context) (SpanInfo, bool) {
 	sc := trace.SpanContextFromContext(ctx)
 	if !sc.IsValid() {
@@ -190,14 +197,21 @@ func newTracerProvider(ctx context.Context, cfg *config, res *resource.Resource)
 		sdktrace.WithMaxExportBatchSize(cfg.maxExportBatch),
 		sdktrace.WithMaxQueueSize(cfg.maxQueueSize),
 	)
-	return sdktrace.NewTracerProvider(
+	tpOpts := []sdktrace.TracerProviderOption{
 		sdktrace.WithSampler(cfg.traceSampler),
 		sdktrace.WithResource(res),
 		sdktrace.WithSpanProcessor(bsp),
-	), nil
+	}
+	for _, sp := range cfg.extraProcessors {
+		tpOpts = append(tpOpts, sdktrace.WithSpanProcessor(sp))
+	}
+	return sdktrace.NewTracerProvider(tpOpts...), nil
 }
 
 func newTraceExporter(ctx context.Context, cfg *config) (sdktrace.SpanExporter, error) {
+	if cfg.stdoutExporter {
+		return stdouttrace.New(stdouttrace.WithPrettyPrint())
+	}
 	switch cfg.protocol {
 	case ProtocolHTTP:
 		opts := []otlptracehttp.Option{otlptracehttp.WithEndpointURL(cfg.endpoint)}
@@ -206,6 +220,9 @@ func newTraceExporter(ctx context.Context, cfg *config) (sdktrace.SpanExporter, 
 		}
 		if len(cfg.headers) > 0 {
 			opts = append(opts, otlptracehttp.WithHeaders(cfg.headers))
+		}
+		if cfg.tlsCfg != nil {
+			opts = append(opts, otlptracehttp.WithTLSClientConfig(cfg.tlsCfg))
 		}
 		return otlptrace.New(ctx, otlptracehttp.NewClient(opts...))
 	default:
@@ -216,23 +233,40 @@ func newTraceExporter(ctx context.Context, cfg *config) (sdktrace.SpanExporter, 
 		if len(cfg.headers) > 0 {
 			opts = append(opts, otlptracegrpc.WithHeaders(cfg.headers))
 		}
+		if cfg.tlsCfg != nil {
+			opts = append(opts, otlptracegrpc.WithTLSCredentials(credsFromTLS(cfg.tlsCfg)))
+		}
 		return otlptracegrpc.New(ctx, opts...)
 	}
 }
 
 func newMeterProvider(ctx context.Context, cfg *config, res *resource.Resource) (*sdkmetric.MeterProvider, error) {
+	mpOpts := []sdkmetric.Option{sdkmetric.WithResource(res)}
+
+	// OTLP (or stdout) periodic reader.
 	exporter, err := newMetricExporter(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	reader := sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(cfg.metricInterval))
-	return sdkmetric.NewMeterProvider(
-		sdkmetric.WithResource(res),
-		sdkmetric.WithReader(reader),
-	), nil
+	periodic := sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(cfg.metricInterval))
+	mpOpts = append(mpOpts, sdkmetric.WithReader(periodic))
+
+	// Optional Prometheus scrape reader alongside.
+	if cfg.promMux != nil {
+		promReader, err := newPrometheusReader(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("prometheus reader: %w", err)
+		}
+		mpOpts = append(mpOpts, sdkmetric.WithReader(promReader))
+	}
+
+	return sdkmetric.NewMeterProvider(mpOpts...), nil
 }
 
 func newMetricExporter(ctx context.Context, cfg *config) (sdkmetric.Exporter, error) {
+	if cfg.stdoutExporter {
+		return stdoutmetric.New()
+	}
 	switch cfg.protocol {
 	case ProtocolHTTP:
 		opts := []otlpmetrichttp.Option{otlpmetrichttp.WithEndpointURL(cfg.endpoint)}
@@ -242,6 +276,9 @@ func newMetricExporter(ctx context.Context, cfg *config) (sdkmetric.Exporter, er
 		if len(cfg.headers) > 0 {
 			opts = append(opts, otlpmetrichttp.WithHeaders(cfg.headers))
 		}
+		if cfg.tlsCfg != nil {
+			opts = append(opts, otlpmetrichttp.WithTLSClientConfig(cfg.tlsCfg))
+		}
 		return otlpmetrichttp.New(ctx, opts...)
 	default:
 		opts := []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpoint(cfg.endpoint)}
@@ -250,6 +287,9 @@ func newMetricExporter(ctx context.Context, cfg *config) (sdkmetric.Exporter, er
 		}
 		if len(cfg.headers) > 0 {
 			opts = append(opts, otlpmetricgrpc.WithHeaders(cfg.headers))
+		}
+		if cfg.tlsCfg != nil {
+			opts = append(opts, otlpmetricgrpc.WithTLSCredentials(credsFromTLS(cfg.tlsCfg)))
 		}
 		return otlpmetricgrpc.New(ctx, opts...)
 	}
