@@ -8,6 +8,7 @@ Independently versioned Go modules, each with its own `go.mod`:
 
 ```
 config/       — github.com/viantonugroho11/go-lib/config       (Go 1.23+)
+errors/       — github.com/viantonugroho11/go-lib/errors       (Go 1.23+)
 httpclient/   — github.com/viantonugroho11/go-lib/httpclient   (Go 1.23+)
 httpserver/   — github.com/viantonugroho11/go-lib/httpserver   (Go 1.23+)
 kafka/        — github.com/viantonugroho11/go-lib/kafka        (Go 1.23+)
@@ -68,6 +69,15 @@ There is no top-level Makefile or workspace file. Running `go test ./...` from t
 - Package name is `config_load` (not `config`). Import as `config_load "github.com/viantonugroho11/go-lib/config"`.
 - ENV overrides use `ENVPREFIX_FIELD_SUBFIELD` pattern (dots replaced with underscores). Controlled by `envPrefix` passed to `New`.
 - Default struct tag for mapping is `"json"`. Override with `WithStructTagName("mapstructure")`.
+
+### errors
+
+- **`errors.go`** — `Error` type: stable `Code` (identity), `Kind` (transport class → HTTP/gRPC status), default `Message`, template `Args`, wrapped `Cause`. Kind constructors: `NewValidation`, `NewNotFound`, `NewConflict`, `NewUnauthorized`, `NewForbidden`, `NewTooMany`, `NewInternal`, `NewUnavailable`. `Is` matches by Code so `errors.Is(err, sentinel)` works across wraps.
+- **`resolver.go`** — `Resolver` interface renders locale-aware messages. `ContextWithLocale` / `LocaleFromContext` for ctx-based lookup. Global `SetDefaultResolver` + `Resolve(ctx, err)` free function; noop resolver installed at init so package works before boot wiring.
+- **`file_resolver.go`** — `NewFileResolver(dir)` loads every `<locale>.(yaml|yml|json)` in a directory as `map[code]template`. Uses `text/template` (`missingkey=zero`). Hot reload via `fsnotify`; parse failure on reload keeps previous dictionary and fires `WithReloadErrorHook`. Fallback chain: requested locale → default locale (`WithDefaultLocale`, default `"en"`) → `Error.Message` → `Error.Code`.
+- **`http.go`** — `StatusCode(err)` maps `Kind` → HTTP status. Wire in `httpserver` error middleware alongside `errors.Resolve(ctx, err)` for body.
+
+**Design invariant:** `Code` + `Kind` are code (never configurable); `Message` + locale variants are configuration. Clients switch on `Code`, never on `Message`.
 
 ### httpserver
 
